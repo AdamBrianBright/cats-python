@@ -5,7 +5,7 @@
 # Requirements
 
 - Tornado 6+
-- Python 3.9+
+- Python 3.8+
 
 # Installation
 
@@ -24,72 +24,85 @@ poetry add cats-python
 # Get Started
 
 ```python
-import cats
+from cats import Api, Application, Event, Request, Server
+from cats.middleware import default_error_handler
 
-# Create new route table
-app = cats.App()
+api = Api()
 
 
 # Setup endpoint handler
-@app(0)
-async def handler(request: cats.Request):
-    return cats.Response(b'Hello world')
+@api.on(0)
+async def handler(request: Request):
+  return b'Hello world'
 
+
+# Create app
+app = Application(apis=[api], middleware=[default_error_handler])
+app.add_event_listener(Event.ON_SERVER_START, lambda server: print('Hello world!'))
 
 # Create server
-
-cats_server = cats.Server([app], port=9090)
-cats_server.run(0)
+cats_server = Server(app, idle_timeout=60.0, input_timeout=10.0)
+cats_server.bind(9090)
+cats_server.start(0)
 ```
 
 # Advanced usage
 
-## Different responses
+## Data Types
 
-```python
-import cats
+CATS support different data types
 
-app = cats.App()
+### Binary
 
+Code: '0x00'
 
-@app(id=10, name='User profile')
-async def user_profile(request: cats.Request):
-    return cats.JsonResponse({
-        'id': 0,
-        'username': 'Adam_Bright',
-    })
+- `return b'Hello world'` Byte string
+- `return bytearray([1, 2, 3])` Byte array
+- `return memoryview(a)` memory view
+- `return bytes()` - empty payload / 0 bytes payload
 
+### JSON
 
-@app(id=0xAFAA, name='Download update')
-async def download_update(request: cats.Request):
-    return cats.FileResponse('../tmp/app.exe')
+Code: '0x01'
 
+- `return {"a": 3}` - Dict -> b'{"a":3}'
+- `return [1, 2, 3]` - List -> b'[1,2,3]'
+- `return 10` - Int -> b'10'
+- `return 50.2` - Float -> b'50.2'
+- `return False` - Bool -> b'false'
+- `return cats.NULL` - null -> b'null'
 
-@app(id=0xAFAB, name='Lazy download')
-async def lazy_download(request: cats.Request):
-    yield cats.StreamResponse(content_length=65535)
-    yield b'Some plain bytes'
-    yield b'other bytes part'
-    # ...
-```
+### Files
+
+Code: '0x02'
+
+- `return Path('../app.exe')` - Single item file array -> {"app.exe": FileInfo}
+- `return [Path('../file1.txt'), Path('../file2.txt)]` - File array -> {"file1.txt": FileInfo, "file2.txt": FileInfo}
+- `return {"a": Path('lol.txt')}` - Named file array -> {"a": FileInfo}
+
+### Different status
+
+By default, "status" field is set to 200. If you want to change it you may want to create your own Request() instance
+and send it manually, but if you wish to use "return" syntax you may also return `Tuple[result: Any, status: int]`
 
 ## Class handlers
 
-If you want to describe handlers as classes - you MUST inherit them from `app.Handler`
-since it behave mostly like `@app.__call__()` decorator. If you want to inherit other parent classes, then
-place `app.Handler` at the right
+If you want to describe handlers as classes - you MUST inherit them from `cats.Handler`
+since it behave mostly like `@cats.handler.__call__()` decorator. If you want to inherit other parent classes, then
+place `cats.Handler` at the right
 
 ```python
 import cats
+
+# CatsHandler - your custom abstract class that may add some common features
 from utils import CatsHandler
 
-app = cats.App()
+api = cats.Api()
 
 
-class EchoHandler(CatsHandler, app.Handler, id=0xAFAF):
-    async def handle(self):
-        data = self.request.data
-        yield cats.Response(data)
+class EchoHandler(CatsHandler, cats.Handler, api=api, id=0xAFAF):
+  async def handle(self):
+    return self.request.data
 ```
 
 ## JSON validation
@@ -98,20 +111,21 @@ Packet currently support only DRF serializers
 
 ```python
 import cats
+from rest_framework.serializers import Serializer, IntegerField, CharField
 
-app = cats.App()
+api = cats.Api()
 
 
-class UserSignIn(app.Handler, id=0xFAFA):
-    class Load(Serializer):
-        id = IntegerField()
-        name = CharField(max_length=32)
+class UserSignIn(cats.Handler, api=api, id=0xFAFA):
+  class Loader(Serializer):
+    id = IntegerField()
+    name = CharField(max_length=32)
 
-    Dump = Load
+  Dumper = Loader
 
-    async def handle(self):
-        data = await self.json_load()
-        return cats.JsonResponse(await self.json_dump(data))
+  async def handle(self):
+    data = await self.json_load()
+    return await self.json_dump(data)
 ```
 
 ## Children request
@@ -121,23 +135,25 @@ CATS also support nested data transfer inside single handler
 ```python
 import cats
 
-app = cats.App()
+api = cats.Api()
 
 
-@app(1)
+@api.on(1)
 async def lazy_handler(request: cats.Request):
-    user = request.json()
-    async with request.input(b'Enter One-Time password') as res:
-        return cats.JsonResponse({
-            'token': 'asfbc96aecb9aeaf6aefabced'
-        })
+  user = request.data
+  async with request.input(b'Enter One-Time password') as res:
+    res: cats.Request
+    return {
+      'username': user['username'],
+      'token': 'asfbc96aecb9aeaf6aefabced',
+      'code': res.data['code'],
+    }
 
 
-class SomeHandler(app.Handler, id=520):
-    async def handle(self):
-        data = self.request.data
-        async with self.json_input({'action': 'confirm'}) as res:
-            return cats.JsonResponse({'ok': True})
+class SomeHandler(cats.Handler, id=520):
+  async def handle(self):
+    async with self.input({'action': 'confirm'}) as res:
+      return {'ok': True}
 ```
 
 ## API Versioning
@@ -154,27 +170,27 @@ Client provide version only once at connection establishment
 ```python
 import cats
 
-app = cats.App()
+api = cats.Api()
 
 
-@app(1, version=0)
-async def first_version():
-    pass
+@api.on(1, version=0)
+async def first_version(request: cats.Request):
+  pass
 
 
-@app(1, version=2, end_version=3)
-async def second_version():
-    pass
+@api.on(1, version=2, end_version=3)
+async def second_version(request: cats.Request):
+  pass
 
 
-@app(1, version=5, end_version=7)
-async def third_version():
-    pass
+@api.on(1, version=5, end_version=7)
+async def third_version(request: cats.Request):
+  pass
 
 
-@app(1, version=9)
-async def last_version():
-    pass
+@api.on(1, version=9)
+async def last_version(request: cats.Request):
+  pass
 ```
 
 Handlers from above will be called accordingly table below
@@ -204,25 +220,26 @@ import cats
 
 
 async def handle(request: cats.Request):
-    # Send to every conn in channel
-    for conn in request.server.channel('__all__'):
-        await conn.send(cats.Response(b'Hello everybody!'))
+  app: cats.Application = request.conn.app
 
-    # Add to channel
-    request.conn.attach_to_channel('chat #0101')
-    request.server.attach_conn_to_channel('chat #0101', request.conn)
+  # Send to every conn in channel
+  for conn in app.channel('__all__'):
+    await conn.send(request.handler_id, b'Hello everybody!')
 
-    # Remove from channel
-    request.conn.detach_from_channel('chat #0101')
-    request.server.detach_conn_from_channel('chat #0101', request.conn)
+  # Add to channel
+  app.attach_conn_to_channel(request.conn, 'chat #0101')
 
-    # Check if in channel
-    request.conn in request.server.channel('chat #0101')
+  # Remove from channel
+  app.detach_conn_from_channel(request.conn, 'chat #0101')
 
-    # Get all channels (warning, in this example same message may be send multiple times)
-    for channel in request.server.channels():
-        for conn in channel:
-            conn.send(cats.Response(b'Hello!'))
+  # Check if in channel
+  if request.conn in app.channel('chat #0101'):
+    pass
+
+  # Get all channels (warning, in this example same message may be send multiple times)
+  for channel in request.conn.server.channels():
+    for conn in channel:
+      await conn.send(0, b'Hello!', request.message_id)
 ```
 
 ## Events
@@ -230,35 +247,28 @@ async def handle(request: cats.Request):
 Events allow you to mark which function to call if something happened
 
 ```python
-import cats.events
+import cats
 
 
-@cats.events.on(cats.events.HANDLE_ERROR)
+# on handle error
 async def error_handler(request: cats.Request, exc: Exception = None):
-    if isinstance(exc, AssertionError):
-        raise ValueError from exc
-    raise exc
+  if isinstance(exc, AssertionError):
+    print(f'Assertion error occurred during handling request {request}')
 
 
-@cats.events.on(cats.events.BEFORE_RESPONSE)
-async def global_formatter(request: cats.Request, response: cats.Response):
-    if isinstance(response, JsonResponse) and response.data.get('error'):
-        response.status = 500
-    return response
+app = cats.Application([])
+app.add_event_listener(cats.Event.ON_HANDLE_ERROR, error_handler)
 ```
 
 Supported events list:
 
-+ `cats.events.SERVER_START [server: cats.Server]`
-+ `cats.events.SERVER_CLOSE [server: cats.Server, exc: Exception = None]`
-+ `cats.events.CONN_START [conn: cats.Connection]`
-+ `cats.events.CONN_CLOSE [conn: cats.Connection, exc: Exception = None]`
-+ `cats.events.CONN_ERROR [conn: cats.Connection, exc: Exception = None]`
-+ `cats.events.BEFORE_REQUEST [request: cats.Request] -> Optional[Request]`
-+ `cats.events.AFTER_REQUEST [request: cats.Request]`
-+ `cats.events.BEFORE_RESPONSE [request: cats.Request, respose: cats.Response] -> Optional[Response]`
-+ `cats.events.AFTER_RESPONSE [request: cats.Request, respose: cats.Response]`
-+ `cats.events.HANDLE_ERROR [request: cats.Request, exc: Exception = None] (must raise from exception)`
++ `cats.Event.ON_SERVER_START [server: cats.Server]`
++ `cats.Event.ON_SERVER_CLOSE [server: cats.Server, exc: Exception = None]`
++ `cats.Event.ON_CONN_START [conn: cats.Connection]`
++ `cats.Event.ON_CONN_CLOSE [conn: cats.Connection, exc: Exception = None]`
++ `cats.Event.ON_HANDSHAKE_PASS [conn: cats.Connection]`
++ `cats.Event.ON_HANDSHAKE_FAIL [conn: cats.Connection, handshake: bytes]`
++ `cats.Event.ON_HANDLE_ERROR [request: cats.Request, exc: Exception = None]`
 
 # Protocol description
 
@@ -288,20 +298,25 @@ This `<Header>` length is always `20 bytes` and it consists of:
 + Status `2 bytes unsigned int` - treat as HTTP Status Code analog
 + Time `8 bytes unsigned int` - unix timestamp in milliseconds UTC - show when `.write()` was triggered at sender side
 + Data type `1 byte unsigned int` - treat as HTTP `Content-Type` header. Supported types:
-    + 00000000 - plain bytes
-    + 00000001 - JSON
+  + 00000000 - plain bytes
+  + 00000001 - JSON
 + Compression type `1 byte unsigned int` - Shows if any compression was used. Supported types:
-    + 00000000 - no compression
-    + 00000001 - GZIP compression
+  + 00000000 - no compression
+  + 00000001 - GZIP compression
 + Data length `4 bytes unsigned int` - Shows how long `<Data>` section is
 
-**Header type 01** - children request header
+**Header type 01** - streaming header
+
+This `<Header>` length is always `16 bytes` and it is same as `Header type 00` but without *Data
+length* `4 bytes unsigned int`
+
+**Header type 02** - children request header
 
 This `<Header>` length is always `8 bytes` and it consists of:
 
 + Message id `2 bytes unsigned int` - same as in request header
 + Data type `1 byte unsigned int`
-+ Compression type `1 byte unsgined int`
++ Compression type `1 byte unsigned int`
 + Data length `4 bytes unsigned int`
 
 **Behavior example**
@@ -343,10 +358,27 @@ Client want to send `{"access_token": "abcdef"}` JSON string to handler `0` and 
 + Client reads data length from `<Header>` == `00000011`
 + Client reads `<Data>` with length of `11 bytes`
 
+**Streaming request behavior**
+
+In this scenario instead of reading exactly `N = [0;1<<32) bytes`, where `N` defined in header, you must
+read `4 bytes unsigned int` and then data in loop until `N = 0` which means end of payload
+
+Example:
+
+- `0000000b` - ten byte chunk
+- *`hello world`*
+- `00000001` - one byte chunk
+- *`!`*
+- `00000000` - end of payload
+
+Data (de)compression must be applied for each chunk separately but Codec must be applied for the entire content. So if
+you wish to send JSON via Streaming request you must watch carefully how you generate it, since Codec may not support
+GeneratorType data.
+
 **Children request behavior**
 
 If `async with request.input()` was used, then before `Server calculates JSON string length` we may add any amount of
-reversed request/response message exchanging but with `Header type == 01`
+reversed request/response message exchanging but with `Header type == 02`
 
 Example:
 
@@ -355,15 +387,15 @@ Example:
 + Server handler`(id=0x0000)` handles request
 
 - ...
-- Server sends `<Header type>` == `01`
+- Server sends `<Header type>` == `02`
 - Server sends `<Header message_id=513, type=0, compress=0, length=0>` == `02 01` `00` `00` `00`
-- Client reads `<Header type>` == `01`
+- Client reads `<Header type>` == `02`
 - Client reads `<Header>`
 - Client reads `<Data>` (skip since no data transferred)
-- Client sends `<Header type>` == `01`
+- Client sends `<Header type>` == `02`
 - Client sends `<Header message_id=513, type=1, compress=0, length=4` == `02 01` `01` `00` `04`
 - Client sends `<Data>` == `74727565`  _(`true` json object)_
-- Server reads `<Header type>` == `01`
+- Server reads `<Header type>` == `02`
 - Server reads `<Header>`
 - Server reads `<Data>`
 - ...
