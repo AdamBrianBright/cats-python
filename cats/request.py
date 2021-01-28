@@ -1,5 +1,6 @@
 import os
-from asyncio import Future
+from asyncio import Future, sleep
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone
 from inspect import isasyncgen, isgenerator
 from pathlib import Path
@@ -63,6 +64,14 @@ class BaseRequest(dict):
 
     async def send_to_conn(self) -> None:
         raise NotImplementedError
+
+    @asynccontextmanager
+    async def lock(self):
+        while self.conn.is_sending:
+            await sleep(0.05)
+        self.conn.is_sending = True
+        yield
+        self.conn.is_sending = False
 
 
 class Request(BaseRequest, type_id=0x00, struct=Struct('>HHHQBBI')):
@@ -130,42 +139,43 @@ class Request(BaseRequest, type_id=0x00, struct=Struct('>HHHQBBI')):
             return await Codec.decode(buff, data_type)
 
     async def send_to_conn(self) -> None:
-        data, data_type = await Codec.encode(self.data)
+        async with self.lock():
+            data, data_type = await Codec.encode(self.data)
 
-        try:
-            if isinstance(data, Path):
-                buff, data = data, tmp_file()
-                compression = await Compressor.compress_file(buff, data)
-                data_len = os.path.getsize(data.resolve().as_posix())
-            else:
-                data, compression = await Compressor.compress(data)
-                data_len = len(data)
+            try:
+                if isinstance(data, Path):
+                    buff, data = data, tmp_file()
+                    compression = await Compressor.compress_file(buff, data)
+                    data_len = os.path.getsize(data.resolve().as_posix())
+                else:
+                    data, compression = await Compressor.compress(data)
+                    data_len = len(data)
 
-            header = self.struct.pack(
-                self.handler_id,
-                self.message_id,
-                self.status,
-                round(self.send_time.timestamp() * 1000),
-                data_type,
-                compression,
-                data_len,
-            )
-            self.conn.reset_idle_timer()
-            await self.conn.stream.write(self.type_id.to_bytes(1, 'big', signed=False))
-            await self.conn.stream.write(header)
-
-            if isinstance(data, Path):
-                left = data_len
-                with data.open('rb') as fh:
-                    chunk = fh.read(max(left, 1 << 20))
-                    self.conn.reset_idle_timer()
-                    await self.conn.stream.write(chunk)
-            else:
+                header = self.struct.pack(
+                    self.handler_id,
+                    self.message_id,
+                    self.status,
+                    round(self.send_time.timestamp() * 1000),
+                    data_type,
+                    compression,
+                    data_len,
+                )
                 self.conn.reset_idle_timer()
-                await self.conn.stream.write(data)
-        finally:
-            if isinstance(data, Path):
-                data.unlink(missing_ok=True)
+                await self.conn.stream.write(self.type_id.to_bytes(1, 'big', signed=False))
+                await self.conn.stream.write(header)
+
+                if isinstance(data, Path):
+                    left = data_len
+                    with data.open('rb') as fh:
+                        chunk = fh.read(max(left, 1 << 20))
+                        self.conn.reset_idle_timer()
+                        await self.conn.stream.write(chunk)
+                else:
+                    self.conn.reset_idle_timer()
+                    await self.conn.stream.write(data)
+            finally:
+                if isinstance(data, Path):
+                    data.unlink(missing_ok=True)
 
 
 class StreamRequest(Request, type_id=0x01, struct=Struct('>HHHQBB')):
@@ -230,40 +240,41 @@ class StreamRequest(Request, type_id=0x01, struct=Struct('>HHHQBB')):
             yield item
 
     async def send_to_conn(self) -> None:
-        data = self.data
-        compression = await Compressor.propose_compression(b'0' * 5000)
-        if isgenerator(data):
-            data = self._async_gen(data)
-        elif not isasyncgen(data):
-            raise self.conn.ProtocolError('Provided invalid data to stream')
+        async with self.lock():
+            data = self.data
+            compression = await Compressor.propose_compression(b'0' * 5000)
+            if isgenerator(data):
+                data = self._async_gen(data)
+            elif not isasyncgen(data):
+                raise self.conn.ProtocolError('Provided invalid data to stream')
 
-        header = self.struct.pack(
-            self.handler_id,
-            self.message_id,
-            self.status,
-            round(self.send_time.timestamp() * 1000),
-            self.data_type,
-            compression
-        )
+            header = self.struct.pack(
+                self.handler_id,
+                self.message_id,
+                self.status,
+                round(self.send_time.timestamp() * 1000),
+                self.data_type,
+                compression
+            )
 
-        await self.conn.stream.write(self.type_id.to_bytes(1, 'big', signed=False))
-        await self.conn.stream.write(header)
+            await self.conn.stream.write(self.type_id.to_bytes(1, 'big', signed=False))
+            await self.conn.stream.write(header)
 
-        async for chunk in data:
-            if not isinstance(chunk, (bytes, bytearray, memoryview)):
-                raise self.conn.ProtocolError('Provided data chunk is invalid')
+            async for chunk in data:
+                if not isinstance(chunk, (bytes, bytearray, memoryview)):
+                    raise self.conn.ProtocolError('Provided data chunk is invalid')
 
-            chunk, compression = await Compressor.compress(chunk, compression)
+                chunk, compression = await Compressor.compress(chunk, compression)
 
-            chunk_size = len(chunk)
-            if chunk_size >= 1 << 32:
-                raise self.conn.ProtocolError('Provided data chunk exceeded max size')
+                chunk_size = len(chunk)
+                if chunk_size >= 1 << 32:
+                    raise self.conn.ProtocolError('Provided data chunk exceeded max size')
 
+                self.conn.reset_idle_timer()
+                await self.conn.stream.write(chunk_size.to_bytes(4, 'big', signed=False))
+                await self.conn.stream.write(chunk)
             self.conn.reset_idle_timer()
-            await self.conn.stream.write(chunk_size.to_bytes(4, 'big', signed=False))
-            await self.conn.stream.write(chunk)
-        self.conn.reset_idle_timer()
-        await self.conn.stream.write(b'\x00\x00\x00\x00')
+            await self.conn.stream.write(b'\x00\x00\x00\x00')
 
 
 class InputRequest(BaseRequest, type_id=0x02, struct=Struct('>HBBI')):
@@ -278,34 +289,35 @@ class InputRequest(BaseRequest, type_id=0x02, struct=Struct('>HBBI')):
         return cls(conn=conn, message_id=message_id, data=data)
 
     async def send_to_conn(self) -> None:
-        data, data_type = await Codec.encode(self.data)
+        async with self.lock():
+            data, data_type = await Codec.encode(self.data)
 
-        try:
-            if isinstance(data, Path):
-                buff, data = data, tmp_file()
-                compression = await Compressor.compress_file(buff, data)
-                data_len = os.path.getsize(data.resolve().as_posix())
-            else:
-                data, compression = await Compressor.compress(data)
-                data_len = len(data)
+            try:
+                if isinstance(data, Path):
+                    buff, data = data, tmp_file()
+                    compression = await Compressor.compress_file(buff, data)
+                    data_len = os.path.getsize(data.resolve().as_posix())
+                else:
+                    data, compression = await Compressor.compress(data)
+                    data_len = len(data)
 
-            header = self.struct.pack(self.message_id, data_type, compression, data_len)
-            self.conn.reset_idle_timer()
-            await self.conn.stream.write(self.type_id.to_bytes(1, 'big', signed=False))
-            await self.conn.stream.write(header)
-
-            if isinstance(data, Path):
-                left = data_len
-                with data.open('rb') as fh:
-                    chunk = fh.read(max(left, 1 << 20))
-                    self.conn.reset_idle_timer()
-                    await self.conn.stream.write(chunk)
-            else:
+                header = self.struct.pack(self.message_id, data_type, compression, data_len)
                 self.conn.reset_idle_timer()
-                await self.conn.stream.write(data)
-        finally:
-            if isinstance(data, Path):
-                data.unlink(missing_ok=True)
+                await self.conn.stream.write(self.type_id.to_bytes(1, 'big', signed=False))
+                await self.conn.stream.write(header)
+
+                if isinstance(data, Path):
+                    left = data_len
+                    with data.open('rb') as fh:
+                        chunk = fh.read(max(left, 1 << 20))
+                        self.conn.reset_idle_timer()
+                        await self.conn.stream.write(chunk)
+                else:
+                    self.conn.reset_idle_timer()
+                    await self.conn.stream.write(data)
+            finally:
+                if isinstance(data, Path):
+                    data.unlink(missing_ok=True)
 
     async def answer(self, data) -> None:
         response = InputRequest(self.conn, self.message_id, data)

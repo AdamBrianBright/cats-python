@@ -85,3 +85,23 @@ async def test_api_internal_json_request(cats_conn: Connection, answer, result):
     response = await cats_conn.recv()
     assert isinstance(response, Request)
     assert response.data == result
+
+
+@mark.asyncio
+async def test_api_json_validation(cats_conn: Connection):
+    await cats_conn.send(0xFFB0, {'id': 5, 'name': 'adam'})
+    response = await cats_conn.recv()
+    assert isinstance(response, Request)
+
+    data = response.data
+    assert isinstance(data, dict)
+    assert isinstance(data['token'], str) and len(data['token']) == 64
+    assert isinstance(data['code'], str) and len(data['code']) == 6
+
+
+@mark.asyncio
+async def test_api_json_invalid(cats_conn: Connection):
+    await cats_conn.send(0xFFB0, 'not even a dict')
+    res = await cats_conn.recv()
+    assert isinstance(res, Request)
+    assert res.status == 500

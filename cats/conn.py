@@ -22,7 +22,7 @@ class Connection:
 
     __slots__ = (
         '_closed', 'stream', 'host', 'port', 'api_version', 'server',
-        'loop', 'input_queue', '_idle_timer', '_message_pool',
+        'loop', 'input_queue', '_idle_timer', '_message_pool', 'is_sending',
     )
 
     def __init__(self, stream: IOStream, address: Tuple[str, int], api_version: int, server):
@@ -36,6 +36,7 @@ class Connection:
         self.input_queue: Dict[int, Future] = {}
         self._idle_timer: Optional[Future] = None
         self._message_pool: List[int] = []
+        self.is_sending: bool = False
 
     @property
     def is_open(self):
@@ -103,10 +104,10 @@ class Connection:
             result = await shield(fn(request))
             if result is not None:
                 if isinstance(result, tuple) and len(result) == 2:
-                    status, result = result
+                    result, status = result
                 else:
                     status = 200
-                response = Request(self, request.message_id, result, request.handler_id, status)
+                response = Request(self, request.message_id, result, request.handler_id, status=status)
                 await response.send_to_conn()
         except (KeyboardInterrupt, CancelledError, StreamClosedError):
             raise

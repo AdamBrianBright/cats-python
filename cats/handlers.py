@@ -113,7 +113,7 @@ class Handler(metaclass=ABCMeta):
         item = HandlerItem(id, name, cls._to_func(), version, end_version)
         api.register(item)
 
-    async def handle(self) -> Optional[Request]:
+    async def handle(self):
         raise NotImplementedError
 
     @classmethod

@@ -11,7 +11,7 @@ class Connection:
 
     __slots__ = (
         '_closed', 'stream', 'host', 'port', 'api_version', 'server',
-        'loop', 'input_queue', '_idle_timer', '_message_pool',
+        'loop', 'input_queue', '_idle_timer', '_message_pool', 'is_sending',
     )
 
     def __init__(self, stream: IOStream, address: Tuple[str, int], api_version: int, server: Server):
@@ -25,6 +25,7 @@ class Connection:
         self.input_queue: Dict[int, Future]
         self._idle_timer: Optional[Future]
         self._message_pool: List[int]
+        self.is_sending: bool
 
     @property
     def is_open(self) -> bool: ...

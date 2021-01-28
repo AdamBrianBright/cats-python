@@ -1,6 +1,6 @@
 from datetime import datetime, timezone
 from struct import Struct
-from typing import Any, AsyncIterable, Dict, Optional, Tuple, Type, Union
+from typing import Any, AsyncContextManager, AsyncIterable, Dict, Optional, Tuple, Type, Union
 
 from cats import Connection
 from cats.codecs import Files
@@ -31,6 +31,8 @@ class BaseRequest(dict):
     async def recv_from_conn(cls, conn) -> 'BaseRequest': ...
 
     async def send_to_conn(self) -> None: ...
+
+    async def lock(self) -> AsyncContextManager: ...
 
 
 class Request(BaseRequest, type_id=0x00, struct=Struct('>HHHQBBI')):

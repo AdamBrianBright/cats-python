@@ -33,7 +33,7 @@ api = Api()
 # Setup endpoint handler
 @api.on(0)
 async def handler(request: Request):
-  return b'Hello world'
+    return b'Hello world'
 
 
 # Create app
@@ -54,7 +54,7 @@ CATS support different data types
 
 ### Binary
 
-Code: '0x00'
+Code: `0x00`
 
 - `return b'Hello world'` Byte string
 - `return bytearray([1, 2, 3])` Byte array
@@ -63,18 +63,18 @@ Code: '0x00'
 
 ### JSON
 
-Code: '0x01'
+Code: `0x01`
 
-- `return {"a": 3}` - Dict -> b'{"a":3}'
-- `return [1, 2, 3]` - List -> b'[1,2,3]'
-- `return 10` - Int -> b'10'
-- `return 50.2` - Float -> b'50.2'
-- `return False` - Bool -> b'false'
-- `return cats.NULL` - null -> b'null'
+- `return {"a": 3}` - Dict -> b`{"a":3}`
+- `return [1, 2, 3]` - List -> b`[1,2,3]`
+- `return 10` - Int -> b`10`
+- `return 50.2` - Float -> b`50.2`
+- `return False` - Bool -> b`false`
+- `return cats.NULL` - null -> b`null`
 
 ### Files
 
-Code: '0x02'
+Code: `0x02`
 
 - `return Path('../app.exe')` - Single item file array -> {"app.exe": FileInfo}
 - `return [Path('../file1.txt'), Path('../file2.txt)]` - File array -> {"file1.txt": FileInfo, "file2.txt": FileInfo}
@@ -101,8 +101,8 @@ api = cats.Api()
 
 
 class EchoHandler(CatsHandler, cats.Handler, api=api, id=0xAFAF):
-  async def handle(self):
-    return self.request.data
+    async def handle(self):
+        return self.request.data
 ```
 
 ## JSON validation
@@ -117,15 +117,15 @@ api = cats.Api()
 
 
 class UserSignIn(cats.Handler, api=api, id=0xFAFA):
-  class Loader(Serializer):
-    id = IntegerField()
-    name = CharField(max_length=32)
+    class Loader(Serializer):
+        id = IntegerField()
+        name = CharField(max_length=32)
 
-  Dumper = Loader
+    Dumper = Loader
 
-  async def handle(self):
-    data = await self.json_load()
-    return await self.json_dump(data)
+    async def handle(self):
+        data = await self.json_load()
+        return await self.json_dump(data)
 ```
 
 ## Children request
@@ -140,20 +140,19 @@ api = cats.Api()
 
 @api.on(1)
 async def lazy_handler(request: cats.Request):
-  user = request.data
-  async with request.input(b'Enter One-Time password') as res:
-    res: cats.Request
+    user = request.data
+    res: cats.Request = await request.input(b'Enter One-Time password')
     return {
-      'username': user['username'],
-      'token': 'asfbc96aecb9aeaf6aefabced',
-      'code': res.data['code'],
+        'username': user['username'],
+        'token': 'asfbc96aecb9aeaf6aefabced',
+        'code': res.data['code'],
     }
 
 
 class SomeHandler(cats.Handler, id=520):
-  async def handle(self):
-    async with self.input({'action': 'confirm'}) as res:
-      return {'ok': True}
+    async def handle(self):
+        res = await self.input({'action': 'confirm'})
+        return {'ok': True}
 ```
 
 ## API Versioning
@@ -162,8 +161,8 @@ You may have multiple handlers assigned to a single ID but version parameter mus
 
 + Version must be int in range 0 .. 65535 (2 bytes)
 + If you provide only base version, versions higher than current will also trigger handler
-+ If you specify end version, version in range $base .. $end will trigger handler
-+ If you specify base versions with gaps, then version in range $base1 .. $base2-1 will trigger handler 1
++ If you specify end version, version in range `$base` .. `$end` will trigger handler
++ If you specify base versions with gaps, then version in range `$base1` .. `$base2 - 1` will trigger handler 1
 
 Client provide version only once at connection establishment
 
@@ -175,22 +174,22 @@ api = cats.Api()
 
 @api.on(1, version=0)
 async def first_version(request: cats.Request):
-  pass
+    pass
 
 
 @api.on(1, version=2, end_version=3)
 async def second_version(request: cats.Request):
-  pass
+    pass
 
 
 @api.on(1, version=5, end_version=7)
 async def third_version(request: cats.Request):
-  pass
+    pass
 
 
 @api.on(1, version=9)
 async def last_version(request: cats.Request):
-  pass
+    pass
 ```
 
 Handlers from above will be called accordingly table below
@@ -212,7 +211,7 @@ Handlers from above will be called accordingly table below
 
 ## Channels
 
-All connections are assigned to channel "__all__" and can also be assigned to different channels You can send messages
+All connections are assigned to channel `__all__` and can also be assigned to different channels You can send messages
 to some or every connection in channels
 
 ```python
@@ -220,26 +219,26 @@ import cats
 
 
 async def handle(request: cats.Request):
-  app: cats.Application = request.conn.app
+    app: cats.Application = request.conn.app
 
-  # Send to every conn in channel
-  for conn in app.channel('__all__'):
-    await conn.send(request.handler_id, b'Hello everybody!')
+    # Send to every conn in channel
+    for conn in app.channel('__all__'):
+        await conn.send(request.handler_id, b'Hello everybody!')
 
-  # Add to channel
-  app.attach_conn_to_channel(request.conn, 'chat #0101')
+    # Add to channel
+    app.attach_conn_to_channel(request.conn, 'chat #0101')
 
-  # Remove from channel
-  app.detach_conn_from_channel(request.conn, 'chat #0101')
+    # Remove from channel
+    app.detach_conn_from_channel(request.conn, 'chat #0101')
 
-  # Check if in channel
-  if request.conn in app.channel('chat #0101'):
-    pass
+    # Check if in channel
+    if request.conn in app.channel('chat #0101'):
+        pass
 
-  # Get all channels (warning, in this example same message may be send multiple times)
-  for channel in request.conn.server.channels():
-    for conn in channel:
-      await conn.send(0, b'Hello!', request.message_id)
+    # Get all channels (warning, in this example same message may be send multiple times)
+    for channel in request.conn.server.channels():
+        for conn in channel:
+            await conn.send(0, b'Hello!', request.message_id)
 ```
 
 ## Events
@@ -252,8 +251,8 @@ import cats
 
 # on handle error
 async def error_handler(request: cats.Request, exc: Exception = None):
-  if isinstance(exc, AssertionError):
-    print(f'Assertion error occurred during handling request {request}')
+    if isinstance(exc, AssertionError):
+        print(f'Assertion error occurred during handling request {request}')
 
 
 app = cats.Application([])
@@ -270,6 +269,43 @@ Supported events list:
 + `cats.Event.ON_HANDSHAKE_FAIL [conn: cats.Connection, handshake: bytes]`
 + `cats.Event.ON_HANDLE_ERROR [request: cats.Request, exc: Exception = None]`
 
+## Handshake
+
+You may add handshake stage between connection and message exchange stages. To do so provide subclass instance
+of `Handshake` class to the server instance:
+
+```python
+import cats
+
+handshake = cats.SHA256TimeHandshake(b'some secret key', 1, 5.0)
+server = cats.Server(cats.Application([]), handshake)
+```
+
+### `SHA256TimeHandshake(secret_key: bytes, valid_window: int, timeout: float)`
+
+Arguments:
+
+- `secret_key: bytes` - just a salt to generate `sha256(secret_key + time)`
+- `valid_window: int >= 0` - shows how much `time` mismatch (1 = ±10 seconds) may still be valid
+- `timeout: float` - how long should server wait for handshake before aborting connection
+
+Hash arguments
+
+- `secret_key: bytes` - key that was provided in `__init__`
+- `time: int` - current unix timestamp in seconds in UTC with last digit rounded to 0. If `now = 123456789.321`
+  then `time_salt = 123456780`
+
+Client must send generated `sha256` key to server right after retrieving `8 bytes unsgined int` unix timestamp at **
+connection stage**
+
+- If handshake is valid, then nothing will be returned
+- If handshake is invalid, then connection will be dropped
+
+Handshake stage byte log example:
+
++ Client send `64 bytes UTF-8` of `sha256` hex digest
++ If handshake is valid: go to **Message exchange**; otherwise drop connection
+
 # Protocol description
 
 Protocol works over _plain_ TCP connection. All integers are in `BigEndian` format
@@ -280,6 +316,11 @@ Protocol works over _plain_ TCP connection. All integers are in `BigEndian` form
 + Client send `4 bytes (unsigned int)` of API version
 + Server send `8 bytes (unsigned int)` of unix timestamp in milliseconds UTC
 
+## Handshake stage
+
+If `Handshake` subclass instance was provided to `Server` then right here client and sever must exchange messages to
+establish handshake according to chosen algorithm that is described in section above.
+
 ## Message exchange
 
 CATS only support one message at time, if you want to send different requests at same time - you can't
@@ -288,7 +329,7 @@ Message consists of 3 parts: `<Header Type>`, `<Header>` and `<Data>`
 
 `<Header Type>` length is always `1 byte` and it shows which type of header to expect next:
 
-**Header type 00** - basic header
+**Header type `00`** - basic header
 
 This `<Header>` length is always `20 bytes` and it consists of:
 
@@ -298,19 +339,20 @@ This `<Header>` length is always `20 bytes` and it consists of:
 + Status `2 bytes unsigned int` - treat as HTTP Status Code analog
 + Time `8 bytes unsigned int` - unix timestamp in milliseconds UTC - show when `.write()` was triggered at sender side
 + Data type `1 byte unsigned int` - treat as HTTP `Content-Type` header. Supported types:
-  + 00000000 - plain bytes
-  + 00000001 - JSON
+  + 0x`00000000` - plain bytes
+  + 0x`00000001` - JSON
+  + 0x`00000002` - FILES
 + Compression type `1 byte unsigned int` - Shows if any compression was used. Supported types:
-  + 00000000 - no compression
-  + 00000001 - GZIP compression
+  + 0x`00000000` - no compression
+  + 0x`00000001` - GZIP compression
 + Data length `4 bytes unsigned int` - Shows how long `<Data>` section is
 
-**Header type 01** - streaming header
+**Header type `01`** - streaming header
 
 This `<Header>` length is always `16 bytes` and it is same as `Header type 00` but without *Data
 length* `4 bytes unsigned int`
 
-**Header type 02** - children request header
+**Header type `02`** - children request header
 
 This `<Header>` length is always `8 bytes` and it consists of:
 
@@ -365,11 +407,11 @@ read `4 bytes unsigned int` and then data in loop until `N = 0` which means end 
 
 Example:
 
-- `0000000b` - ten byte chunk
+- 0x`0000000b` - ten byte chunk
 - *`hello world`*
-- `00000001` - one byte chunk
+- 0x`00000001` - one byte chunk
 - *`!`*
-- `00000000` - end of payload
+- 0x`00000000` - end of payload
 
 Data (de)compression must be applied for each chunk separately but Codec must be applied for the entire content. So if
 you wish to send JSON via Streaming request you must watch carefully how you generate it, since Codec may not support
@@ -377,7 +419,7 @@ GeneratorType data.
 
 **Children request behavior**
 
-If `async with request.input()` was used, then before `Server calculates JSON string length` we may add any amount of
+If `await request.input()` was used, then before `Server calculates JSON string length` we may add any amount of
 reversed request/response message exchanging but with `Header type == 02`
 
 Example:

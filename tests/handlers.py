@@ -1,4 +1,8 @@
+import os
 from asyncio import sleep
+
+from rest_framework.fields import CharField, IntegerField
+from rest_framework.serializers import Serializer
 
 from cats import Api, Handler, Request
 from cats.codecs import Codec
@@ -8,7 +12,6 @@ api = Api()
 
 @api.on(0, name='echo handler')
 async def echo_handler(request: Request):
-    print('ECHO HANDLER issued')
     return request.data
 
 
@@ -60,3 +63,24 @@ async def internal_json_requests(request: Request):
         return "Nice!"
     else:
         return "Sad!"
+
+
+class JsonFormHandler(Handler, api=api, id=0xFFB0):
+    class Loader(Serializer):
+        id = IntegerField(min_value=0, max_value=10)
+        name = CharField(min_length=3, max_length=16)
+
+    class Dumper(Serializer):
+        token = CharField(min_length=64, max_length=64)
+        code = CharField(min_length=6, max_length=6)
+
+    async def handle(self):
+        user = await self.json_load()
+        assert isinstance(user, dict)
+        assert isinstance(user['id'], int) and 0 <= user['id'] <= 10
+        assert isinstance(user['name'], str) and 3 <= len(user['name']) <= 16
+
+        return await self.json_dump({
+            'token': os.urandom(32).hex(),
+            'code': os.urandom(3).hex(),
+        })
