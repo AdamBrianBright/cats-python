@@ -37,11 +37,11 @@ async def handler(request: Request):
 
 
 # Create app
-app = Application(apis=[api], middleware=[default_error_handler])
+app = Application(apis=[api], middleware=[default_error_handler], idle_timeout=60.0, input_timeout=10.0)
 app.add_event_listener(Event.ON_SERVER_START, lambda server: print('Hello world!'))
 
 # Create server
-cats_server = Server(app, idle_timeout=60.0, input_timeout=10.0)
+cats_server = Server(app)
 cats_server.bind(9090)
 cats_server.start(0)
 ```
@@ -141,7 +141,7 @@ api = cats.Api()
 @api.on(1)
 async def lazy_handler(request: cats.Request):
     user = request.data
-    res: cats.Request = await request.input(b'Enter One-Time password')
+    res: cats.InputRequest = await request.input(b'Enter One-Time password')
     return {
         'username': user['username'],
         'token': 'asfbc96aecb9aeaf6aefabced',
@@ -239,8 +239,8 @@ async def handle(request: cats.Request):
         pass
 
     # Get all channels (warning, in this example same message may be send multiple times)
-    for channel in request.conn.server.channels():
-        for conn in channel:
+    for channel in app.channels():
+        for conn in app.channel(channel):
             await conn.send(0, b'Hello!', request.message_id)
 ```
 
@@ -266,10 +266,10 @@ Supported events list:
 
 + `cats.Event.ON_SERVER_START [server: cats.Server]`
 + `cats.Event.ON_SERVER_CLOSE [server: cats.Server, exc: Exception = None]`
-+ `cats.Event.ON_CONN_START [conn: cats.Connection]`
-+ `cats.Event.ON_CONN_CLOSE [conn: cats.Connection, exc: Exception = None]`
-+ `cats.Event.ON_HANDSHAKE_PASS [conn: cats.Connection]`
-+ `cats.Event.ON_HANDSHAKE_FAIL [conn: cats.Connection, handshake: bytes]`
++ `cats.Event.ON_CONN_START [server: cats.Server, conn: cats.Connection]`
++ `cats.Event.ON_CONN_CLOSE [server: cats.Server, conn: cats.Connection, exc: Exception = None]`
++ `cats.Event.ON_HANDSHAKE_PASS [server: cats.Server, conn: cats.Connection]`
++ `cats.Event.ON_HANDSHAKE_FAIL [server: cats.Server, conn: cats.Connection, handshake: bytes]`
 + `cats.Event.ON_HANDLE_ERROR [request: cats.Request, exc: Exception = None]`
 
 ## Handshake

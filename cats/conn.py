@@ -4,8 +4,10 @@ from logging import getLogger
 from random import randint
 from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Union
 
+from sentry_sdk import Scope, add_breadcrumb, capture_exception
 from tornado.iostream import IOStream, StreamClosedError
 
+from cats import HandshakeError, Identity
 from cats.events import Event
 from cats.handlers import HandlerFunc
 from cats.request import BaseRequest, InputRequest, Request, StreamRequest
@@ -21,17 +23,19 @@ class Connection:
     MAX_PLAIN_DATA_SIZE: int = 1 << 24
 
     __slots__ = (
-        '_closed', 'stream', 'host', 'port', 'api_version', 'server',
-        'loop', 'input_queue', '_idle_timer', '_message_pool', 'is_sending',
+        '_closed', 'stream', 'host', 'port', 'api_version', 'server', '_scope',
+        '_identity', 'loop', 'input_queue', '_idle_timer', '_message_pool', 'is_sending',
     )
 
-    def __init__(self, stream: IOStream, address: Tuple[str, int], api_version: int, server):
+    def __init__(self, stream: IOStream, address: Tuple[str, int], api_version: int, app):
         logging.debug(f'New connection established: {address}')
         self._closed: bool = False
         self.stream = stream
         self.host, self.port = address
         self.api_version = api_version
-        self.server = server
+        self._app = app
+        self._scope = Scope()
+        self._identity: Optional[Identity] = None
         self.loop = get_event_loop()
         self.input_queue: Dict[int, Future] = {}
         self._idle_timer: Optional[Future] = None
@@ -40,14 +44,13 @@ class Connection:
 
     @property
     def is_open(self):
-        return not self.stream.closed() and self.server.is_running
+        return not self._closed and not self.stream.closed()
 
     @property
     def app(self):
-        return self.server.app
+        return self._app
 
     async def init(self):
-        await self.app.trigger(Event.ON_CONN_START, conn=self)
         logging.debug(f'{self} initialized')
 
     async def start(self):
@@ -72,10 +75,18 @@ class Connection:
         await request.send_to_conn()
 
     def attach_to_channel(self, channel: str):
-        self.server.app.attach_conn_to_channel(self, channel=channel)
+        self.app.attach_conn_to_channel(self, channel=channel)
 
     def detach_from_channel(self, channel: str):
-        self.server.app.detach_conn_from_channel(self, channel=channel)
+        self.app.detach_conn_from_channel(self, channel=channel)
+
+    @property
+    def conns_with_same_identity(self) -> Iterable['Connection']:
+        return self.app.channel(f'model_{self._identity.model_name}:{self._identity.id}')
+
+    @property
+    def conns_with_same_model(self) -> Iterable['Connection']:
+        return self.app.channel(f'model_{self._identity.model_name}')
 
     async def tick(self, request: BaseRequest):
         if isinstance(request, Request):
@@ -84,6 +95,61 @@ class Connection:
             await self.handle_input_answer(request)
         else:
             raise self.ProtocolError('Unsupported request')
+
+    @property
+    def identity(self) -> Optional[Identity]:
+        return self._identity
+
+    @property
+    def identity_scope_user(self):
+        if not self.signed_in():
+            return {'ip': self.host}
+
+        identity = self.identity
+
+        scope_user = {
+            'id': identity.id,
+            'ip': self.host,
+            'model': identity.model_name,
+            'data': identity.sentry_scope,
+        }
+        return scope_user
+
+    def signed_in(self) -> bool:
+        return self._identity is not None
+
+    def sign_in(self, identity: Any):
+        self._identity = identity
+
+        model_group = f'model_{identity.model_name}'
+        auth_group = f'{model_group}:{identity.id}'
+        self.attach_to_channel(model_group)
+        self.attach_to_channel(auth_group)
+
+        self._scope.set_user(self.identity_scope_user)
+        add_breadcrumb(message='Sign in', data={
+            'id': identity.pk,
+            'model': identity.__class__.__name__,
+            'instance': str(identity),
+        })
+
+        logging.debug(f'Signed in as {identity.__class__.__name__} <{self.host}:{self.port}>')
+
+    def sign_out(self):
+        logging.debug(f'Signed out from {self.identity.__class__.__name__} <{self.host}:{self.port}>')
+        if self.signed_in():
+            model_group = f'model_{self.identity.model_name}'
+            auth_group = f'{model_group}:{self._identity.id}'
+
+            self.detach_from_channel(auth_group)
+            self.detach_from_channel(model_group)
+
+            self._identity = None
+
+        self._scope.set_user(self.identity_scope_user)
+        add_breadcrumb(message='Sign out')
+
+        return self
 
     def on_tick_done(self, task: Task):
         if exc := task.exception():
@@ -118,6 +184,7 @@ class Connection:
         except (KeyboardInterrupt, CancelledError, StreamClosedError):
             raise
         except Exception as err:
+            capture_exception(err, scope=self._scope)
             await self.app.trigger(Event.ON_HANDLE_ERROR, request=request, exc=err)
         self._message_pool.remove(message_id)
 
@@ -151,11 +218,18 @@ class Connection:
     async def close(self, exc: Exception = None):
         if self._closed:
             return
+
         self._closed = True
+
+        await self.sign_out()
+        if exc and not isinstance(exc, (HandshakeError,)):
+            logging.error(f'Connection {(self.host, self.port)} closed')
+            logging.error(exc)
+            capture_exception(exc, scope=self._scope)
+
         if self._idle_timer is not None:
             self._idle_timer.cancel()
             self._idle_timer = None
-        await self.app.trigger(Event.ON_CONN_CLOSE, conn=self, exc=exc)
         self.stream.close(exc)
         logging.debug(f'{self} closed: {exc = }')
 
@@ -169,11 +243,11 @@ class Connection:
         pass
 
     def reset_idle_timer(self):
-        if self.server.idle_timeout > 0:
+        if self.app.idle_timeout > 0:
             if self._idle_timer is not None:
                 self._idle_timer.cancel()
 
-            self._idle_timer = self.loop.call_later(self.server.idle_timeout, partial(self._close, TimeoutError))
+            self._idle_timer = self.loop.call_later(self.app.idle_timeout, partial(self._close, TimeoutError))
 
     def _get_free_message_id(self) -> int:
         while True:

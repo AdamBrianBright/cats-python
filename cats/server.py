@@ -24,21 +24,18 @@ logging = getLogger('CATS.Server')
 class Server(TCPServer):
 
     def __init__(self, app: Application, handshake: Handshake = None,
-                 idle_timeout: Union[int, float] = None, input_timeout: Union[int, float] = None,
                  ssl_options: Optional[Union[Dict[str, Any], ssl.SSLContext]] = None,
                  max_buffer_size: Optional[int] = None, read_chunk_size: Optional[int] = None) -> None:
         self.app = app
         self.handshake = handshake
         self.port: Optional[int] = None
-        self.idle_timeout = idle_timeout or 0
-        self.input_timeout = input_timeout or 0
         self.connections: List[Connection] = []
         super().__init__(ssl_options, max_buffer_size, read_chunk_size)
 
     # TCP Connection entry point
     async def handle_stream(self, stream: IOStream, address: Tuple[str, int]) -> None:
         conn = await self.init_connection(stream, address)
-        self.app.attach_conn_to_channel(conn, '__all__')
+        conn.attach_to_channel('__all__')
         self.connections.append(conn)
         try:
             await conn.start()
@@ -46,7 +43,10 @@ class Server(TCPServer):
             raise
         except Exception as err:
             await conn.close(exc=err)
+            await self.app.trigger(Event.ON_CONN_CLOSE, server=self, conn=conn, exc=err)
             stream.close(err)
+        else:
+            await self.app.trigger(Event.ON_CONN_CLOSE, server=self, conn=conn)
         finally:
             self.app.remove_conn_from_channels(conn)
             self.connections.remove(conn)
@@ -57,11 +57,12 @@ class Server(TCPServer):
         current_time = datetime.now(tz=timezone.utc).timestamp()
         await stream.write(round(current_time * 1000).to_bytes(8, 'big', signed=False))
 
-        conn = Connection(stream, address, api_version, self)
+        conn = Connection(stream, address, api_version, self.app)
         if self.handshake is not None:
-            await self.handshake.validate(conn)
+            await self.handshake.validate(self, conn)
 
         await conn.init()
+        await self.app.trigger(Event.ON_CONN_START, server=self, conn=conn)
         return conn
 
     @property

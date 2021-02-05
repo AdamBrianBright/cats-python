@@ -113,13 +113,18 @@ class Handler(metaclass=ABCMeta):
         item = HandlerItem(id, name, cls._to_func(), version, end_version)
         api.register(item)
 
+    async def prepare(self) -> None:
+        pass
+
     async def handle(self):
         raise NotImplementedError
 
     @classmethod
     def _to_func(cls) -> HandlerFunc:
-        def wrapper(*args, **kwargs):
-            return cls(*args, **kwargs).handle()
+        async def wrapper(*args, **kwargs):
+            handler = cls(*args, **kwargs)
+            await handler.prepare()
+            return handler.handle()
 
         return wrapper
 

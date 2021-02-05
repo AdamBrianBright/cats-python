@@ -4,5 +4,6 @@ from .conn import *
 from .events import *
 from .handlers import *
 from .handshake import *
+from .identity import *
 from .request import *
 from .server import *
