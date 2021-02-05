@@ -155,7 +155,7 @@ class FileCodec(BaseCodec):
         try:
             data = tuple(cls.normalize_input(data))
             header = [
-                {"key": key, "name": info.name, "path": info.path, "size": info.size, "type": info.mime}
+                {"key": key, "name": info.name, "size": info.size, "type": info.mime}
                 for key, info in data
             ]
             with tmp.open('wb') as fh:

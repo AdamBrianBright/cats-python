@@ -7,9 +7,14 @@ from cats.conn import Connection
 from cats.events import Event
 
 __all__ = [
+    'HandshakeError',
     'Handshake',
     'SHA256TimeHandshake',
 ]
+
+
+class HandshakeError(ValueError):
+    pass
 
 
 class Handshake:
@@ -37,5 +42,5 @@ class SHA256TimeHandshake(Handshake):
         handshake: bytes = await wait_for(conn.stream.read_bytes(64), self.timeout)
         if handshake.decode('utf-8') not in self.get_hashes():
             await conn.app.trigger(Event.ON_HANDSHAKE_FAIL, conn=conn, handshake=handshake)
-            raise ValueError('Invalid handshake')
+            raise HandshakeError('Invalid handshake')
         await conn.app.trigger(Event.ON_HANDSHAKE_PASS, conn=conn)
