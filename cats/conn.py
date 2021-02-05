@@ -71,6 +71,12 @@ class Connection:
                                 handler_id=handler_id, status=status)
         await request.send_to_conn()
 
+    def attach_to_channel(self, channel: str):
+        self.server.app.attach_conn_to_channel(self, channel=channel)
+
+    def detach_from_channel(self, channel: str):
+        self.server.app.detach_conn_from_channel(self, channel=channel)
+
     async def tick(self, request: BaseRequest):
         if isinstance(request, Request):
             await self.handle_request(request)

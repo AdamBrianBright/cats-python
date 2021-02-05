@@ -149,7 +149,7 @@ async def lazy_handler(request: cats.Request):
     }
 
 
-class SomeHandler(cats.Handler, id=520):
+class SomeHandler(cats.Handler, api=api, id=520):
     async def handle(self):
         res = await self.input({'action': 'confirm'})
         return {'ok': True}
@@ -219,7 +219,8 @@ import cats
 
 
 async def handle(request: cats.Request):
-    app: cats.Application = request.conn.app
+    conn: cats.Connection = request.conn
+    app: cats.Application = conn.app
 
     # Send to every conn in channel
     for conn in app.channel('__all__'):
@@ -227,9 +228,11 @@ async def handle(request: cats.Request):
 
     # Add to channel
     app.attach_conn_to_channel(request.conn, 'chat #0101')
+    conn.attach_to_channel('chat #0101')
 
     # Remove from channel
     app.detach_conn_from_channel(request.conn, 'chat #0101')
+    conn.detach_from_channel('chat #0101')
 
     # Check if in channel
     if request.conn in app.channel('chat #0101'):
@@ -280,6 +283,8 @@ import cats
 handshake = cats.SHA256TimeHandshake(b'some secret key', 1, 5.0)
 server = cats.Server(cats.Application([]), handshake)
 ```
+
+If failed, handshake must raise `cats.handshake.HandshakeError` exception
 
 ### `SHA256TimeHandshake(secret_key: bytes, valid_window: int, timeout: float)`
 

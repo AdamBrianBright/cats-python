@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "cats-python"
-version = "1.0.2"
+version = "1.0.3"
 description = "Cifrazia Action Transport System for Python"
 authors = ["Bogdan Parfenov <adam.brian.bright@gmail.com>"]
 license = "MIT"
@@ -8,7 +8,7 @@ license = "MIT"
 [tool.poetry.dependencies]
 python = ">=3.8"
 tornado = "^6.1"
-ujson = "^4.0.1"
+ujson = "^4.0.2"
 
 [tool.poetry.dev-dependencies]
 pytest = "^6.2.1"
