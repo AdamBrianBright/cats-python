@@ -36,7 +36,9 @@ async def test_no_response(cats_conn: Connection):
 ])
 @mark.asyncio
 async def test_api_version(cats_client_stream: IOStream, cats_server, api_version: int, handler_version: int):
-    conn = await init_cats_conn(cats_client_stream, '127.0.0.1', cats_server.port, cats_server, api_version)
+    conn = await init_cats_conn(cats_client_stream, '127.0.0.1',
+                                cats_server.port, cats_server.app,
+                                api_version, cats_server.handshake)
     await conn.send(2, b'')
 
     if handler_version is not None:

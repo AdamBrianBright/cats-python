@@ -303,8 +303,8 @@ Hash arguments
 Client must send generated `sha256` key to server right after retrieving `8 bytes unsgined int` unix timestamp at **
 connection stage**
 
-- If handshake is valid, then nothing will be returned
-- If handshake is invalid, then connection will be dropped
+- If handshake is valid, `01` will be returned
+- If handshake is invalid, `00` will be returned and connection will be dropped
 
 Handshake stage byte log example:
 
@@ -435,12 +435,12 @@ Example:
 
 - ...
 - Server sends `<Header type>` == `02`
-- Server sends `<Header message_id=513, type=0, compress=0, length=0>` == `02 01` `00` `00` `00`
+- Server sends `<Header message_id=513, type=0, compress=0, length=0>` == `02 01` `00` `00` `00 00 00 00`
 - Client reads `<Header type>` == `02`
 - Client reads `<Header>`
 - Client reads `<Data>` (skip since no data transferred)
 - Client sends `<Header type>` == `02`
-- Client sends `<Header message_id=513, type=1, compress=0, length=4` == `02 01` `01` `00` `04`
+- Client sends `<Header message_id=513, type=1, compress=0, length=4` == `02 01` `01` `00` `00 00 00 04`
 - Client sends `<Data>` == `74727565`  _(`true` json object)_
 - Server reads `<Header type>` == `02`
 - Server reads `<Header>`

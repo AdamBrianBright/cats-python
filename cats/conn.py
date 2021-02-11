@@ -7,9 +7,10 @@ from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Un
 from sentry_sdk import Scope, add_breadcrumb, capture_exception
 from tornado.iostream import IOStream, StreamClosedError
 
-from cats import HandshakeError, Identity
 from cats.events import Event
 from cats.handlers import HandlerFunc
+from cats.handshake import HandshakeError
+from cats.identity import Identity
 from cats.request import BaseRequest, InputRequest, Request, StreamRequest
 
 __all__ = [
@@ -23,7 +24,7 @@ class Connection:
     MAX_PLAIN_DATA_SIZE: int = 1 << 24
 
     __slots__ = (
-        '_closed', 'stream', 'host', 'port', 'api_version', 'server', '_scope',
+        '_closed', 'stream', 'host', 'port', 'api_version', '_app', '_scope',
         '_identity', 'loop', 'input_queue', '_idle_timer', '_message_pool', 'is_sending',
     )
 
@@ -153,7 +154,7 @@ class Connection:
 
     def on_tick_done(self, task: Task):
         if exc := task.exception():
-            self.loop.create_task(self.close(exc))
+            self.close(exc)
 
     async def handle_input_answer(self, request):
         fut: Future = self.input_queue.pop(request.message_id, None)
@@ -215,13 +216,13 @@ class Connection:
 
         return fn
 
-    async def close(self, exc: Exception = None):
+    def close(self, exc: Exception = None):
         if self._closed:
             return
 
         self._closed = True
 
-        await self.sign_out()
+        self.sign_out()
         if exc and not isinstance(exc, (HandshakeError,)):
             logging.error(f'Connection {(self.host, self.port)} closed')
             logging.error(exc)
@@ -232,9 +233,6 @@ class Connection:
             self._idle_timer = None
         self.stream.close(exc)
         logging.debug(f'{self} closed: {exc = }')
-
-    def _close(self, exc: Exception = None):
-        self.loop.create_task(self.close(exc))
 
     def __str__(self) -> str:
         return f'CATS.Connection: {self.host}:{self.port} api@{self.api_version}'
@@ -247,7 +245,7 @@ class Connection:
             if self._idle_timer is not None:
                 self._idle_timer.cancel()
 
-            self._idle_timer = self.loop.call_later(self.app.idle_timeout, partial(self._close, TimeoutError))
+            self._idle_timer = self.loop.call_later(self.app.idle_timeout, partial(self.close, TimeoutError))
 
     def _get_free_message_id(self) -> int:
         while True:

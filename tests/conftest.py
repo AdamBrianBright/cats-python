@@ -1,4 +1,5 @@
 import asyncio
+import logging
 import platform
 from typing import List
 
@@ -8,31 +9,12 @@ from tornado.tcpclient import TCPClient
 
 import cats
 import cats.middleware
+from cats.utils import enable_stream_debug
 from tests.utils import init_cats_conn
 
+logging.basicConfig(level='DEBUG', force=True)
 
-# import logging
-#
-# logging.basicConfig(level='DEBUG', force=True)
-#
-# rb = IOStream.read_bytes
-# wr = IOStream.write
-#
-#
-# async def read_bytes(self, num_bytes, partial: bool = False):
-#     print(f'Reading {num_bytes} {partial = }')
-#     chunk = await rb(self, num_bytes, partial=partial)
-#     print(f'Got {chunk = }')
-#     return chunk
-#
-#
-# async def write(self, data):
-#     print(f'Sending {data = }')
-#     return await wr(self, data)
-#
-#
-# IOStream.read_bytes = read_bytes
-# IOStream.write = write
+enable_stream_debug()
 
 
 @fixture(scope='session')
@@ -70,12 +52,13 @@ def cats_handshake() -> cats.Handshake:
 
 
 @fixture(scope='session')
-def cats_server(cats_app, cats_handshake) -> cats.Server:
+@mark.asyncio
+async def cats_server(cats_app, cats_handshake) -> cats.Server:
     cats_server = cats.Server(app=cats_app, handshake=cats_handshake)
     cats_server.bind_unused_port()
     cats_server.start(1)
     yield cats_server
-    cats_server.shutdown()
+    await cats_server.shutdown()
 
 
 @fixture
@@ -89,7 +72,7 @@ async def cats_client_stream(cats_server) -> IOStream:
 
 @fixture
 @mark.asyncio
-async def cats_conn(cats_client_stream, cats_server) -> cats.Connection:
-    conn = await init_cats_conn(cats_client_stream, '127.0.0.1', cats_server.port, cats_server, 1)
+async def cats_conn(cats_client_stream, cats_server, cats_app) -> cats.Connection:
+    conn = await init_cats_conn(cats_client_stream, '127.0.0.1', cats_server.port, cats_app, 1, cats_server.handshake)
     yield conn
-    await conn.close()
+    conn.close()

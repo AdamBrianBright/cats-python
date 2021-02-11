@@ -4,9 +4,13 @@ from importlib import import_module
 
 from pathlib import Path
 
+from typing import Union
+
 __all__ = [
     'require',
     'tmp_file',
+    'bytes2hex',
+    'enable_stream_debug',
 ]
 
 
@@ -37,3 +41,41 @@ def require(dotted_path: str, /, *, strict: bool = True):
         if strict:
             raise err
         return None
+
+
+def bytes2hex(buffer: Union[bytes, bytearray, memoryview], *, separator: str = ' ', prefix: bool = False) -> str:
+    """
+    Converts byte-like to HEX string
+
+    :param buffer: what to encode
+    :param separator: separator string
+    :param prefix: use 0x prefix
+    :return: HEX style string
+    :raise TypeError:
+    """
+    if not isinstance(buffer, (bytes, bytearray, memoryview)):
+        raise TypeError(f'Invalid buffer type = {type(buffer)}')
+
+    hexadecimal = buffer.hex().upper()
+    parts = (hexadecimal[i: i + 2] for i in range(0, len(hexadecimal), 2))
+    if prefix:
+        parts = ('0x' + part for part in parts)
+    return separator.join(parts)
+
+
+def enable_stream_debug():
+    from tornado.iostream import IOStream
+    rb = IOStream.read_bytes
+    wr = IOStream.write
+
+    async def read_bytes(self: IOStream, num_bytes, partial: bool = False):
+        chunk = await rb(self, num_bytes, partial=partial)
+        print(f'[RECV {self.socket.getpeername()}] {bytes2hex(chunk)}')
+        return chunk
+
+    async def write(self: IOStream, data):
+        print(f'[SEND {self.socket.getpeername()}] {bytes2hex(data)}')
+        return await wr(self, data)
+
+    IOStream.read_bytes = read_bytes
+    IOStream.write = write

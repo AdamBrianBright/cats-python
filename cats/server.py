@@ -1,6 +1,6 @@
 import socket
 import ssl
-from asyncio import CancelledError, get_event_loop, run
+from asyncio import CancelledError, get_event_loop
 from datetime import datetime, timezone
 from logging import getLogger
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -42,7 +42,7 @@ class Server(TCPServer):
         except (KeyboardInterrupt, CancelledError):
             raise
         except Exception as err:
-            await conn.close(exc=err)
+            conn.close(exc=err)
             await self.app.trigger(Event.ON_CONN_CLOSE, server=self, conn=conn, exc=err)
             stream.close(err)
         else:
@@ -69,17 +69,10 @@ class Server(TCPServer):
     def is_running(self) -> bool:
         return self._started and not self._stopped
 
-    def shutdown(self, exc=None):
-        event = self.app.trigger(Event.ON_SERVER_SHUTDOWN, server=self, exc=exc)
-        loop = get_event_loop()
-        if loop and loop.is_running() and not loop.is_closed():
-            loop.create_task(event)
-            for conn in self.connections:
-                loop.create_task(conn.close(exc))
-        else:
-            run(event)
-            for conn in self.connections:
-                run(conn.close(exc))
+    async def shutdown(self, exc=None):
+        await self.app.trigger(Event.ON_SERVER_SHUTDOWN, server=self, exc=exc)
+        for conn in self.connections:
+            conn.close(exc=exc)
 
         self.app.clear_all_channels()
         self.connections.clear()

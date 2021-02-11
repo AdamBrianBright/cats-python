@@ -124,7 +124,7 @@ class Handler(metaclass=ABCMeta):
         async def wrapper(*args, **kwargs):
             handler = cls(*args, **kwargs)
             await handler.prepare()
-            return handler.handle()
+            return await handler.handle()
 
         return wrapper
 
