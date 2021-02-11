@@ -16,6 +16,7 @@ setuptools.setup(
     install_requires=[
         "tornado >= 3.8",
         "ujson >= 4.0.1",
+        "sentry-sdk >= 0.19.5",
     ],
     use_scm_version=True,
     setup_requires=['setuptools_scm'],
