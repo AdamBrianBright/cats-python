@@ -153,7 +153,7 @@ class FileCodec(BaseCodec):
     async def encode(cls, data: FILE_TYPES) -> Path:
         tmp = tmp_file()
         try:
-            data = tuple(cls.normalize_input(data))
+            data = tuple(cls.normalize_input(data).items())
             header = [
                 {"key": key, "name": info.name, "size": info.size, "type": info.mime}
                 for key, info in data

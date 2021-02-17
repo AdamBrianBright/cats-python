@@ -4,7 +4,8 @@ import os
 from pytest import mark, raises
 from tornado.iostream import IOStream, StreamClosedError
 
-from cats import Connection, InputRequest, Request, StreamRequest
+from cats import Connection, FileInfo, InputRequest, Request, StreamRequest
+from cats.utils import tmp_file
 from tests.utils import init_cats_conn
 
 
@@ -14,6 +15,17 @@ async def test_echo_handler(cats_conn: Connection):
     await cats_conn.send(0, payload)
     response = await cats_conn.recv()
     assert response.data == payload
+
+
+@mark.asyncio
+async def test_echo_handler_files(cats_conn: Connection):
+    payload = tmp_file()
+    await cats_conn.send(0, payload)
+    response = await cats_conn.recv()
+    assert isinstance(response.data, dict)
+    for key, val in response.data.items():
+        assert isinstance(key, str)
+        assert isinstance(val, FileInfo)
 
 
 @mark.asyncio
