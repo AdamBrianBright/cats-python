@@ -238,7 +238,7 @@ class FileCodec(BaseCodec):
 
             tmp = tmp_file()
             with tmp.open('wb') as fh:
-                fh.write(data[node['size']])
+                fh.write(data[:node['size']])
                 data = data[node['size']:]
             result[node['key']] = FileInfo(
                 name=node['name'],
