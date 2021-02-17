@@ -34,22 +34,26 @@ class Server(TCPServer):
 
     # TCP Connection entry point
     async def handle_stream(self, stream: IOStream, address: Tuple[str, int]) -> None:
-        conn = await self.init_connection(stream, address)
-        conn.attach_to_channel('__all__')
-        self.connections.append(conn)
+        conn = None
         try:
+            conn = await self.init_connection(stream, address)
+            conn.attach_to_channel('__all__')
+            self.connections.append(conn)
             await conn.start()
         except (KeyboardInterrupt, CancelledError):
             raise
         except Exception as err:
-            conn.close(exc=err)
-            await self.app.trigger(Event.ON_CONN_CLOSE, server=self, conn=conn, exc=err)
-            stream.close(err)
+            if conn is not None:
+                conn.close(exc=err)
+                await self.app.trigger(Event.ON_CONN_CLOSE, server=self, conn=conn, exc=err)
+                stream.close(err)
         else:
-            await self.app.trigger(Event.ON_CONN_CLOSE, server=self, conn=conn)
+            if conn is not None:
+                await self.app.trigger(Event.ON_CONN_CLOSE, server=self, conn=conn)
         finally:
-            self.app.remove_conn_from_channels(conn)
-            self.connections.remove(conn)
+            if conn is not None:
+                self.app.remove_conn_from_channels(conn)
+                self.connections.remove(conn)
 
     async def init_connection(self, stream: IOStream, address: Tuple[str, int]) -> Connection:
         api_version = int.from_bytes(await stream.read_bytes(4), 'big', signed=False)

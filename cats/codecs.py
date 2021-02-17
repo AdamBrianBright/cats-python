@@ -178,44 +178,74 @@ class FileCodec(BaseCodec):
             raise TypeError(f'{cls.__name__} does not support {type(data).__name__}')
 
     @classmethod
-    async def decode(cls, data: Path) -> Files:
+    async def decode(cls, data: Union[Path, bytes, bytearray]) -> Files:
         result = {}
         try:
-            with data.open('rb') as fh:
-                header, b = b'', []
-
-                while part := fh.read(1024):
-                    a, *b = part.split(cls.SEPARATOR, 1)
-                    header += a
-                    if b:
-                        fh.seek(len(header) + 2)
-                        break
-                else:
-                    raise ValueError
-
-                header = ujson.decode(header.decode(cls.encoding))
-
-                if not isinstance(header, list):
-                    raise ValueError
-
-                for node in header:
-                    if not isinstance(node, dict):
-                        raise ValueError
-
-                    tmp = await cls._unpack_file(fh, node)
-                    result[node['key']] = FileInfo(
-                        name=node['name'],
-                        path=tmp,
-                        size=node['size'],
-                        mime=node.get('type'),
-                    )
-
+            if isinstance(data, Path):
+                await cls._decode_from_file(data, result)
+            else:
+                await cls._decode_from_buff(data, result)
             return result
-
         except (KeyError, ValueError, TypeError):
             for v in result.values():
                 v.path.unlink(missing_ok=True)
             raise ValueError('Failed to parse Files form data')
+
+    @classmethod
+    async def _decode_from_file(cls, data: Path, result: dict):
+        with data.open('rb') as fh:
+            header, b = b'', []
+
+            while part := fh.read(1024):
+                a, *b = part.split(cls.SEPARATOR, 1)
+                header += a
+                if b:
+                    fh.seek(len(header) + 2)
+                    break
+            else:
+                raise ValueError
+
+            header = ujson.decode(header.decode(cls.encoding))
+
+            if not isinstance(header, list):
+                raise ValueError
+
+            for node in header:
+                if not isinstance(node, dict):
+                    raise ValueError
+
+                tmp = await cls._unpack_file(fh, node)
+                result[node['key']] = FileInfo(
+                    name=node['name'],
+                    path=tmp,
+                    size=node['size'],
+                    mime=node.get('type'),
+                )
+
+    @classmethod
+    async def _decode_from_buff(cls, data: Union[bytes, bytearray], result: dict):
+        if data.find(cls.SEPARATOR) < 0:
+            raise ValueError
+        header, data = data.split(cls.SEPARATOR, 1)
+        header = ujson.decode(header.decode(cls.encoding))
+
+        if not isinstance(header, list):
+            raise ValueError
+
+        for node in header:
+            if not isinstance(node, dict):
+                raise ValueError
+
+            tmp = tmp_file()
+            with tmp.open('wb') as fh:
+                fh.write(data[node['size']])
+                data = data[node['size']:]
+            result[node['key']] = FileInfo(
+                name=node['name'],
+                path=tmp,
+                size=node['size'],
+                mime=node.get('type'),
+            )
 
     @classmethod
     async def _unpack_file(cls, fh: BinaryIO, node) -> Path:
@@ -228,7 +258,7 @@ class FileCodec(BaseCodec):
                     raise ValueError
                 node_fh.write(buff)
                 left -= len(buff)
-        return Path(tmp.name)
+        return tmp
 
 
 class Codec:
