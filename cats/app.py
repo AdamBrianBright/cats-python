@@ -12,9 +12,10 @@ __all__ = [
 
 
 class Application:
-    __slots__ = ('_handlers', '_middleware', '_events', '_channels')
+    __slots__ = ('_handlers', '_middleware', '_events', '_channels', 'idle_timeout', 'input_timeout')
 
-    def __init__(self, apis: List[Api], middleware: List[Middleware] = None):
+    def __init__(self, apis: List[Api], middleware: List[Middleware] = None,
+                 idle_timeout: Union[int, float] = None, input_timeout: Union[int, float] = None):
         if middleware is None:
             middleware = [
                 default_error_handler,
@@ -23,6 +24,8 @@ class Application:
         self._middleware = middleware
         self._events: DefaultDict[str, List[Callable]] = defaultdict(list)
         self._channels: DefaultDict[str, List[Connection]] = defaultdict(list)
+        self.idle_timeout = idle_timeout or 0
+        self.input_timeout = input_timeout or 0
 
         api = Api()
         for i in apis:

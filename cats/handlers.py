@@ -7,7 +7,9 @@ from typing import Any, Awaitable, Callable, DefaultDict, Dict, List, Optional, 
 import ujson
 
 from cats.codecs import Codec, Json
+from cats.headers import Headers
 from cats.request import InputRequest, Request
+from cats.response import Response
 
 try:
     from django.db.models import QuerySet
@@ -113,13 +115,18 @@ class Handler(metaclass=ABCMeta):
         item = HandlerItem(id, name, cls._to_func(), version, end_version)
         api.register(item)
 
+    async def prepare(self) -> None:
+        pass
+
     async def handle(self):
         raise NotImplementedError
 
     @classmethod
     def _to_func(cls) -> HandlerFunc:
-        def wrapper(*args, **kwargs):
-            return cls(*args, **kwargs).handle()
+        async def wrapper(*args, **kwargs):
+            handler = cls(*args, **kwargs)
+            await handler.prepare()
+            return await handler.handle()
 
         return wrapper
 
@@ -135,14 +142,15 @@ class Handler(metaclass=ABCMeta):
         else:
             return data
 
-    async def json_dump(self, data) -> Json:
+    async def json_dump(self, data, headers: Headers = None, status: int = 200) -> Response:
         many = isinstance(data, (list, tuple, set, QuerySet, GeneratorType))
 
         if self.Dumper is not None:
-            return self.Dumper(data, many=many).data
+            data = self.Dumper(data, many=many).data
         else:
             ujson.encode(data)
-            return data
+
+        return Response(data=data, headers=headers, status=status)
 
     def input(self, data: Any) -> Awaitable['InputRequest']:
         return self.request.input(data=data)

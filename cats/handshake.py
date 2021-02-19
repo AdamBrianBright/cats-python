@@ -3,7 +3,6 @@ from asyncio import wait_for
 from datetime import datetime, timezone
 from typing import List
 
-from cats.conn import Connection
 from cats.events import Event
 
 __all__ = [
@@ -18,7 +17,7 @@ class HandshakeError(ValueError):
 
 
 class Handshake:
-    async def validate(self, conn: Connection) -> None:
+    async def validate(self, server, conn) -> None:
         raise NotImplementedError
 
 
@@ -38,9 +37,11 @@ class SHA256TimeHandshake(Handshake):
             for i in range(-self.valid_window, self.valid_window + 1)
         ]
 
-    async def validate(self, conn: Connection) -> None:
+    async def validate(self, server, conn) -> None:
         handshake: bytes = await wait_for(conn.stream.read_bytes(64), self.timeout)
         if handshake.decode('utf-8') not in self.get_hashes():
-            await conn.app.trigger(Event.ON_HANDSHAKE_FAIL, conn=conn, handshake=handshake)
+            await conn.app.trigger(Event.ON_HANDSHAKE_FAIL, server=server, conn=conn, handshake=handshake)
+            await conn.stream.write(b'\x00')
             raise HandshakeError('Invalid handshake')
-        await conn.app.trigger(Event.ON_HANDSHAKE_PASS, conn=conn)
+        await conn.app.trigger(Event.ON_HANDSHAKE_PASS, server=server, conn=conn)
+        await conn.stream.write(b'\x01')
