@@ -1,5 +1,6 @@
 import asyncio
 import os
+from datetime import datetime
 
 from pytest import mark, raises
 from tornado.iostream import IOStream, StreamClosedError
@@ -119,3 +120,46 @@ async def test_api_json_invalid(cats_conn: Connection):
     res = await cats_conn.recv()
     assert isinstance(res, Request)
     assert res.status == 500
+
+
+@mark.asyncio
+async def test_api_speed_limiter(cats_conn: Connection):
+    payload = os.urandom(100_000)
+
+    await cats_conn.send(0x0000, payload)
+    start = datetime.now()
+    res = await cats_conn.recv()
+    assert 0 <= (datetime.now() - start).total_seconds() <= 0.1
+    assert res.data == payload
+
+    await cats_conn.set_download_speed(50_000)
+
+    await cats_conn.send(0x0000, payload)
+    start = datetime.now()
+    res = await cats_conn.recv()
+    assert 1 <= (datetime.now() - start).total_seconds() <= 2
+    assert res.data == payload
+
+
+@mark.asyncio
+async def test_api_payload_offset(cats_conn: Connection):
+    payload = os.urandom(10)
+    await cats_conn.send(0, payload, headers={"Offset": 5})
+    response = await cats_conn.recv()
+    assert response.data == payload[5:]
+
+
+@mark.asyncio
+async def test_api_payload_offset_files(cats_conn: Connection):
+    payload = tmp_file()
+    with payload.open('wb') as fh:
+        fh.write(b'1234567890')
+
+    await cats_conn.send(0, payload, headers={"Offset": 5})
+    response = await cats_conn.recv()
+    assert isinstance(response.data, dict)
+    for key, val in response.data.items():
+        assert isinstance(key, str)
+        assert isinstance(val, FileInfo)
+        assert val.size == 5
+        assert val.path.read_bytes() == b'67890'

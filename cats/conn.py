@@ -10,8 +10,10 @@ from tornado.iostream import IOStream, StreamClosedError
 from cats.events import Event
 from cats.handlers import HandlerFunc
 from cats.handshake import HandshakeError
+from cats.headers import Headers
 from cats.identity import Identity
 from cats.request import BaseRequest, InputRequest, Request, StreamRequest
+from cats.response import BaseResponse
 
 __all__ = [
     'Connection',
@@ -24,7 +26,7 @@ class Connection:
     MAX_PLAIN_DATA_SIZE: int = 1 << 24
 
     __slots__ = (
-        '_closed', 'stream', 'host', 'port', 'api_version', '_app', '_scope',
+        '_closed', 'stream', 'host', 'port', 'api_version', '_app', '_scope', 'download_speed',
         '_identity', 'loop', 'input_queue', '_idle_timer', '_message_pool', 'is_sending',
     )
 
@@ -42,6 +44,7 @@ class Connection:
         self._idle_timer: Optional[Future] = None
         self._message_pool: List[int] = []
         self.is_sending: bool = False
+        self.download_speed: int = 0
 
     @property
     def is_open(self):
@@ -60,17 +63,23 @@ class Connection:
             task: Task = self.loop.create_task(self.tick(request))
             task.add_done_callback(self.on_tick_done)
 
-    async def send(self, handler_id: int, data: Any, message_id: int = None, status: int = None):
+    async def set_download_speed(self, speed: int = 0):
+        await self.stream.write(b'\x05')
+        await self.stream.write(speed.to_bytes(4, 'big', signed=False))
+
+    async def send(self, handler_id: int, data: Any, headers: Headers = None,
+                   message_id: int = None, status: int = None):
         if message_id is None:
             message_id = self._get_free_message_id()
-        request = Request(conn=self, message_id=message_id, data=data, handler_id=handler_id, status=status)
+        request = Request(conn=self, message_id=message_id, headers=headers,
+                          data=data, handler_id=handler_id, status=status)
         await request.send_to_conn()
 
     async def send_stream(self, handler_id: int, data: Union[AsyncIterable[bytes], Iterable[bytes]], data_type: int,
-                          message_id: int = None, status: int = None):
+                          headers: Headers = None, message_id: int = None, status: int = None):
         if message_id is None:
             message_id = self._get_free_message_id()
-        request = StreamRequest(conn=self, message_id=message_id,
+        request = StreamRequest(conn=self, message_id=message_id, headers=headers,
                                 data=data, data_type=data_type,
                                 handler_id=handler_id, status=status)
         await request.send_to_conn()
@@ -90,7 +99,13 @@ class Connection:
         return self.app.channel(f'model_{self._identity.model_name}')
 
     async def tick(self, request: BaseRequest):
-        if isinstance(request, Request):
+        if request.type_id == 5:
+            limit = request.data
+            if not limit or 1024 <= limit <= 33_554_432:
+                self.download_speed = limit
+            else:
+                logging.error('Unsupported download speed limit')
+        elif isinstance(request, Request):
             await self.handle_request(request)
         elif isinstance(request, InputRequest):
             await self.handle_input_answer(request)
@@ -176,12 +191,14 @@ class Connection:
         try:
             result = await shield(fn(request))
             if result is not None:
-                if isinstance(result, tuple) and len(result) == 2:
-                    result, status = result
-                else:
-                    status = 200
-                response = Request(self, request.message_id, result, request.handler_id, status=status)
-                await response.send_to_conn()
+                if not isinstance(result, BaseResponse):
+                    raise self.ProtocolError('Returned invalid response')
+
+                response = result.request(conn=self,
+                                          message_id=request.message_id,
+                                          handler_id=request.handler_id,
+                                          **result.request_kwargs())
+                await response.send_to_conn(offset=request.headers.get('Offset', 0))
         except (KeyboardInterrupt, CancelledError, StreamClosedError):
             raise
         except Exception as err:
@@ -194,7 +211,7 @@ class Connection:
         message_type: int = int.from_bytes(await self.stream.read_bytes(1), 'big', signed=False)
         request_class = BaseRequest.get_class_by_type_id(message_type)
         if request_class is None:
-            raise self.ProtocolError('Received unknown message type [first byte]')
+            raise self.ProtocolError(f'Received unknown message type [first byte = {hex(message_type)[2:]}]')
 
         return await request_class.recv_from_conn(self)
 
@@ -232,7 +249,7 @@ class Connection:
             self._idle_timer.cancel()
             self._idle_timer = None
         self.stream.close(exc)
-        logging.debug(f'{self} closed: {exc = }')
+        logging.debug(f'{self} closed: {exc = }', exc_info=exc)
 
     def __str__(self) -> str:
         return f'CATS.Connection: {self.host}:{self.port} api@{self.api_version}'

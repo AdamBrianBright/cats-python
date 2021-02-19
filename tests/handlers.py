@@ -4,7 +4,7 @@ from asyncio import sleep
 from rest_framework.fields import CharField, IntegerField
 from rest_framework.serializers import Serializer
 
-from cats import Api, Handler, Request
+from cats import Api, Handler, Request, Response, StreamResponse
 from cats.codecs import Codec
 
 api = Api()
@@ -12,27 +12,27 @@ api = Api()
 
 @api.on(0, name='echo handler')
 async def echo_handler(request: Request):
-    return request.data
+    return Response(request.data)
 
 
 @api.on(1, name='no response')
 async def no_response(request: Request):
-    return None
+    pass
 
 
 class VersionedHandler(Handler, api=api, id=2, version=1):
     async def handle(self):
-        return {'version': 1}
+        return Response({'version': 1})
 
 
 class VersionedHandler2(Handler, api=api, id=2, version=3, end_version=4):
     async def handle(self):
-        return {'version': 2}
+        return Response({'version': 2})
 
 
 class VersionedHandler3(Handler, api=api, id=2, version=6):
     async def handle(self):
-        return {'version': 3}
+        return Response({'version': 3})
 
 
 @api.on(id=0xFFFF, name='delayed response')
@@ -44,25 +44,25 @@ async def delayed_response(request: Request):
         await sleep(0.5)
         yield b'!'
 
-    await request.conn.send_stream(request.handler_id, gen(), data_type=Codec.T_BYTE)
+    return StreamResponse(gen(), Codec.T_BYTE)
 
 
 @api.on(id=0xFFA0, name='internal requests')
 async def internal_requests(request: Request):
     res = await request.input(b'Are you ok?')
     if res.data == b'yes':
-        return b'Nice!'
+        return Response(b'Nice!')
     else:
-        return b'Sad!'
+        return Response(b'Sad!')
 
 
 @api.on(id=0xFFA1, name='internal requests')
 async def internal_json_requests(request: Request):
     res = await request.input("Are you ok?")
     if res.data == "yes":
-        return "Nice!"
+        return Response("Nice!")
     else:
-        return "Sad!"
+        return Response("Sad!")
 
 
 class JsonFormHandler(Handler, api=api, id=0xFFB0):

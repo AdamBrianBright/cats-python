@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from logging import getLogger
 from typing import Any, Dict, List, Optional, Tuple, Union
 
-from tornado.iostream import IOStream
+from tornado.iostream import IOStream, StreamClosedError
 from tornado.tcpserver import TCPServer
 from tornado.testing import bind_unused_port
 
@@ -43,6 +43,8 @@ class Server(TCPServer):
         except (KeyboardInterrupt, CancelledError):
             raise
         except Exception as err:
+            if isinstance(err, StreamClosedError):
+                err = None
             if conn is not None:
                 conn.close(exc=err)
                 await self.app.trigger(Event.ON_CONN_CLOSE, server=self, conn=conn, exc=err)

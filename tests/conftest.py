@@ -9,12 +9,11 @@ from tornado.tcpclient import TCPClient
 
 import cats
 import cats.middleware
-from cats.utils import enable_stream_debug
 from tests.utils import init_cats_conn
 
 logging.basicConfig(level='DEBUG', force=True)
 
-enable_stream_debug()
+# enable_stream_debug()
 
 
 @fixture(scope='session')

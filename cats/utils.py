@@ -66,6 +66,7 @@ def bytes2hex(buffer: Union[bytes, bytearray, memoryview], *, separator: str = '
 def enable_stream_debug():
     from tornado.iostream import IOStream
     rb = IOStream.read_bytes
+    ru = IOStream.read_until
     wr = IOStream.write
 
     async def read_bytes(self: IOStream, num_bytes, partial: bool = False):
@@ -73,9 +74,15 @@ def enable_stream_debug():
         print(f'[RECV {self.socket.getpeername()}] {bytes2hex(chunk)}')
         return chunk
 
+    async def read_until(self: IOStream, delimiter: bytes, max_bytes: int = None):
+        chunk = await ru(self, delimiter, max_bytes=max_bytes)
+        print(f'[RECV {self.socket.getpeername()}] {bytes2hex(chunk)}')
+        return chunk
+
     async def write(self: IOStream, data):
         print(f'[SEND {self.socket.getpeername()}] {bytes2hex(data)}')
         return await wr(self, data)
 
+    IOStream.read_until = read_until
     IOStream.read_bytes = read_bytes
     IOStream.write = write

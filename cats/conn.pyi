@@ -4,14 +4,14 @@ from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Un
 from sentry_sdk import Scope
 from tornado.iostream import IOStream
 
-from cats import Application, BaseRequest, HandlerFunc, Identity, InputRequest, Request
+from cats import Application, BaseRequest, HandlerFunc, Headers, Identity, InputRequest, Request
 
 
 class Connection:
     MAX_PLAIN_DATA_SIZE: int
 
     __slots__ = (
-        '_closed', 'stream', 'host', 'port', 'api_version', '_app', '_scope',
+        '_closed', 'stream', 'host', 'port', 'api_version', '_app', '_scope', 'download_speed',
         '_identity', 'loop', 'input_queue', '_idle_timer', '_message_pool', 'is_sending',
     )
 
@@ -29,6 +29,7 @@ class Connection:
         self._idle_timer: Optional[Future]
         self._message_pool: List[int]
         self.is_sending: bool
+        self.download_speed: int
 
     @property
     def is_open(self) -> bool: ...
@@ -40,10 +41,13 @@ class Connection:
 
     async def start(self) -> None: ...
 
-    async def send(self, handler_id: int, data: Any, message_id: int = None, status: int = None) -> None: ...
+    async def set_download_speed(self, speed: int = 0): ...
+
+    async def send(self, handler_id: int, data: Any, headers: Headers = None,
+                   message_id: int = None, status: int = None) -> None: ...
 
     async def send_stream(self, handler_id: int, data: Union[AsyncIterable[bytes], Iterable[bytes]], data_type: int,
-                          message_id: int = None, status: int = None) -> None: ...
+                          headers: Headers = None, message_id: int = None, status: int = None) -> None: ...
 
     def on_tick_done(self, task: Task): ...
 

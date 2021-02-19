@@ -24,7 +24,7 @@ poetry add cats-python
 # Get Started
 
 ```python
-from cats import Api, Application, Event, Request, Server
+from cats import Api, Application, Event, Request, Server, Response
 from cats.middleware import default_error_handler
 
 api = Api()
@@ -33,7 +33,7 @@ api = Api()
 # Setup endpoint handler
 @api.on(0)
 async def handler(request: Request):
-    return b'Hello world'
+    return Response(b'Hello world')
 
 
 # Create app
@@ -56,29 +56,29 @@ CATS support different data types
 
 Code: `0x00`
 
-- `return b'Hello world'` Byte string
-- `return bytearray([1, 2, 3])` Byte array
-- `return memoryview(a)` memory view
-- `return bytes()` - empty payload / 0 bytes payload
+- `Response(b'Hello world')` Byte string
+- `Response(bytearray([1, 2, 3]))` Byte array
+- `Response(memoryview(a))` memory view
+- `Response(bytes())` - empty payload / 0 bytes payload
 
 ### JSON
 
 Code: `0x01`
 
-- `return {"a": 3}` - Dict -> b`{"a":3}`
-- `return [1, 2, 3]` - List -> b`[1,2,3]`
-- `return 10` - Int -> b`10`
-- `return 50.2` - Float -> b`50.2`
-- `return False` - Bool -> b`false`
-- `return cats.NULL` - null -> b`null`
+- `Response({"a": 3})` - Dict -> b`{"a":3}`
+- `Response([1, 2, 3])` - List -> b`[1,2,3]`
+- `Response(10)` - Int -> b`10`
+- `Response(50.2)` - Float -> b`50.2`
+- `Response(False)` - Bool -> b`false`
+- `Response(cats.NULL)` - null -> b`null`
 
 ### Files
 
 Code: `0x02`
 
-- `return Path('../app.exe')` - Single item file array -> {"app.exe": FileInfo}
-- `return [Path('../file1.txt'), Path('../file2.txt)]` - File array -> {"file1.txt": FileInfo, "file2.txt": FileInfo}
-- `return {"a": Path('lol.txt')}` - Named file array -> {"a": FileInfo}
+- `Response(Path('../app.exe'))` - Single item file array -> {"app.exe": FileInfo}
+- `Response([Path('../file1.txt'), Path('../file2.txt)])` - File array -> {"file1.txt": FileInfo, "file2.txt": FileInfo}
+- `Response({"a": Path('lol.txt')})` - Named file array -> {"a": FileInfo}
 
 ### Different status
 
@@ -102,12 +102,14 @@ api = cats.Api()
 
 class EchoHandler(CatsHandler, cats.Handler, api=api, id=0xAFAF):
     async def handle(self):
-        return self.request.data
+        return cats.Response(self.request.data)
 ```
 
 ## JSON validation
 
-Packet currently support only DRF serializers
+Packet currently support only DRF serializers.
+
+> _Notice!_ json_dump is also an alias for `Response` creation
 
 ```python
 import cats
@@ -142,17 +144,17 @@ api = cats.Api()
 async def lazy_handler(request: cats.Request):
     user = request.data
     res: cats.InputRequest = await request.input(b'Enter One-Time password')
-    return {
+    return cats.Response({
         'username': user['username'],
         'token': 'asfbc96aecb9aeaf6aefabced',
         'code': res.data['code'],
-    }
+    })
 
 
 class SomeHandler(cats.Handler, api=api, id=520):
     async def handle(self):
         res = await self.input({'action': 'confirm'})
-        return {'ok': True}
+        return cats.Response({'ok': True})
 ```
 
 ## API Versioning
@@ -330,9 +332,13 @@ establish handshake according to chosen algorithm that is described in section a
 
 CATS only support one message at time, if you want to send different requests at same time - you can't
 
-Message consists of 3 parts: `<Header Type>`, `<Header>` and `<Data>`
+### Message structure
+
+Message consists of 4 parts: `<Header Type>`, `<Header>`, `<Message Header>` and `<Data>`
 
 `<Header Type>` length is always `1 byte` and it shows which type of header to expect next:
+
+### Header types
 
 **Header type `00`** - basic header
 
@@ -350,12 +356,14 @@ This `<Header>` length is always `20 bytes` and it consists of:
 + Compression type `1 byte unsigned int` - Shows if any compression was used. Supported types:
   + 0x`00000000` - no compression
   + 0x`00000001` - GZIP compression
-+ Data length `4 bytes unsigned int` - Shows how long `<Data>` section is
++ Data length `4 bytes unsigned int` - Shows how long `<Message Header>` + `2 empty bytes` + `<Data>` sections are
 
 **Header type `01`** - streaming header
 
-This `<Header>` length is always `16 bytes` and it is same as `Header type 00` but without *Data
-length* `4 bytes unsigned int`
+This `<Header>` length is always `16 bytes` and it is same as `Header type 00` but without *Data length*
+`4 bytes unsigned int`
+
+`<Message Header>` here shows as a first chunk _(learn about chunks below)_
 
 **Header type `02`** - children request header
 
@@ -364,65 +372,115 @@ This `<Header>` length is always `8 bytes` and it consists of:
 + Message id `2 bytes unsigned int` - same as in request header
 + Data type `1 byte unsigned int`
 + Compression type `1 byte unsigned int`
-+ Data length `4 bytes unsigned int`
++ Data length `4 bytes unsigned int` - Shows how long `<Message Header>` + `2 empty bytes` + `<Data>` sections are
 
-**Behavior example**
+### Message header
 
-Client want to send `{"access_token": "abcdef"}` JSON string to handler `0` and receive JSON object `{"success": true}`
+Message header works like in HTTP: It contains META information that can be used at protocol level to change up server
+behavior w/o changing business logic.
 
-+ Client calculates JSON string length == `26 bytes`
+Message header is a simple `UTF-8` encoded JSON dictionary followed by two empty bytes (`\x00\x00`)
+
+**Request only Headers**
+
+- `"Offset": int` [1] - tells the server to skip N amount of first bytes of `<Data>` section
+
+**Response only Headers**
+
+There are no response-only header currently supported
+
+**Common Headers**
+
+- `"Files": [{"key": str, "name": str, "size": int, "type": str?}]` [1] - This header is being used when `<Data Type>`
+  in packet header is set to `FILES - 0x02`
+
+> [1] Using "Offset" header for the handler that returns `FILES` will also decrease "size" fields in "Files" response header.
+> If "size" will drop to zero, then file won't appear in "Files" header.
+
+## Behavior example
+
+### Basic behavior
+
+Client wants to send `{"access_token": "abcdef"}` JSON string to handler `0` and receive JSON object `{"success": true}`
+Client wants to send no headers - therefore empty JSON `{}`
+
++ Client encodes `<Message Header>` into `UTF-8 Json Dict`, then adds two empty bytes == `7B 7D 00 00`
++ Client calculates JSON string length == `26 bytes`, then adds `<Message Header>` length == `30 bytes`
 + Client checks if any compression will be of use == `no compression`
 + Client generates random number in range `0 .. 32767` == `513`
 + Client constructs `<Header>` with:
-    + `Handler id = 0` == `00` `00`
-    + `Message id = 513` == `02` `01`
-    + `Status = 200` == `00` `C8` (in request may be anything, even `00` `00`)
-    + `Time = 1608552317314`  == `00` `00` `01` `76` `85` `30` `81` `82` _12/21/2020 @ 12:05pm (UTC)_
-    + `Data type = 1` == `01`
-    + `Compression type = 0` == `00`
-    + `Data length = 26` == `00` `00` `00` `1A`
+  + `Handler id = 0` == `00` `00`
+  + `Message id = 513` == `02` `01`
+  + `Status = 200` == `00` `C8` (in request may be anything, even `00` `00`)
+  + `Time = 1608552317314`  == `00` `00` `01` `76` `85` `30` `81` `82` _12/21/2020 @ 12:05pm (UTC)_
+  + `Data type = 1` == `01`
+  + `Compression type = 0` == `00`
+  + `Data length = 30` == `00` `00` `00` `1E`
 + Client send `<Header type>` == `00`
-+ Client sends `<Header>` == `0000` `0201` `00C8` `0000017685308182` `01` `00` `0000001A`
++ Client sends `<Header>` == `0000` `0201` `00C8` `0000017685308182` `01` `00` `0000001E`
++ Client sends `<Message Header>` == `7B7D` `0000`
 + Client sends `<Data>` == `7B226163636573735F746F6B656E223A2022616263646566227D`
 + Server waits for `20 bytes` of `<Header>`
-+ Server reads data length from `<Header>` == `0000001A`
-+ Server reads `<Data>` with length of `26 bytes`
++ Server reads data length from `<Header>` == `0000001E`
++ Server reads `<Payload>` with length of `30 bytes`
++ Server splits `<Payload>` onto `<Message Header>` and `<Data>` using `00 00` _(two empty bytes)_ separator
 + Server handler`(id=0x0000)` handles request
-+ Server calculates JSON string length == `17 bytes`
++ Server constructs `<Message Header>` == `7B 7D 00 00`
++ Server calculates JSON string length == `17 bytes` + `4 bytes` == `21 bytes`
 + Server checks if any compression will be of use == `no compression`
 + Server constructs `<Header>` with:
-    + `Handler id = 0` == `00` `00` (same as request since it is the same handler)
-    + `Message id = 513` == `02 01` (same as in request since we respond and not request)
-    + `Status = 200` == `00` `C8` (200 as in HTTP == Success)
-    + `Time = 1608552317914`  == `00` `00` `01` `76` `85` `30` `83` `DA` _(plus 600ms)_
-    + `Data type = 1` == `01`
-    + `Compression type = 0` == `00`
-    + `Data length = 17` == `00` `00` `00` `11`
+  + `Handler id = 0` == `00` `00` (same as request since it is the same handler)
+  + `Message id = 513` == `02 01` (same as in request since we respond and not request)
+  + `Status = 200` == `00` `C8` (200 as in HTTP == Success)
+  + `Time = 1608552317914`  == `00` `00` `01` `76` `85` `30` `83` `DA` _(plus 600ms)_
+  + `Data type = 1` == `01`
+  + `Compression type = 0` == `00`
+  + `Data length = 17` == `00` `00` `00` `15`
 + Server sends `<Header type>` == `00`
-+ Server sends `<Header>` == `0000` `0201` `00C8` `00000176853083DA` `01` `00` `00000011`
++ Server sends `<Header>` == `0000` `0201` `00C8` `00000176853083DA` `01` `00` `00000015`
++ Server sends `<Message Header>` == `7B7D` `0000`
 + Server sends `<Data>` == `7B2273756363657373223A20747275657D`
 + Client waits for `<Header message_id=513>`
 + Client reads data length from `<Header>` == `00000011`
-+ Client reads `<Data>` with length of `11 bytes`
++ Client reads `<Message Header>` and `<Data>` with length of `17 bytes`
 
-**Streaming request behavior**
+### Streaming request behavior**
 
-In this scenario instead of reading exactly `N = [0;1<<32) bytes`, where `N` defined in header, you must
+**In comparison with basic behavior**
+
+In this scenario instead of reading exactly `N = [0;1<<32) bytes`, where `N` defined in `<Header>`, you must
 read `4 bytes unsigned int` and then data in loop until `N = 0` which means end of payload
 
-Example:
+**Headers**
 
+Sender must include `<Message Header>` _(without two empty bytes)_ as first chunk of payload. Therefore, no matter how
+empty payload actually is, first `4 bytes` of length and chunk must contain at least:
+
+- `00 00 00 02` - Chunk length
+- `7B 7D` - Message Header
+
+**Compression**
+
+Data (de)compression must be applied for each chunk separately but Codec must be applied for the entire content. So if
+you wish to send JSON via Streaming request you must watch carefully how you generate it, since Codec may not support
+GeneratorType data.
+
+**Payload Example:**
+
+- 0x`00000002` - two byte chunk
+- *`{}` - Empty message Header
 - 0x`0000000b` - ten byte chunk
 - *`hello world`*
 - 0x`00000001` - one byte chunk
 - *`!`*
 - 0x`00000000` - end of payload
 
-Data (de)compression must be applied for each chunk separately but Codec must be applied for the entire content. So if
-you wish to send JSON via Streaming request you must watch carefully how you generate it, since Codec may not support
-GeneratorType data.
+This will be parsed as:
 
-**Children request behavior**
+- `<Message Header>` == `{}`
+- `<Data>` == `"hello world!""`
+
+### Children request behavior
 
 If `await request.input()` was used, then before `Server calculates JSON string length` we may add any amount of
 reversed request/response message exchanging but with `Header type == 02`
@@ -435,17 +493,30 @@ Example:
 
 - ...
 - Server sends `<Header type>` == `02`
-- Server sends `<Header message_id=513, type=0, compress=0, length=0>` == `02 01` `00` `00` `00 00 00 00`
+- Server sends `<Header message_id=513, type=0, compress=0, length=4>` == `02 01` `00` `00` `00 00 00 04`
+- Server sends `<Message Header>` == `7B 7D 00 00`
 - Client reads `<Header type>` == `02`
 - Client reads `<Header>`
+- Client reads `<Message Header>` == `{}` + two empty bytes as separator
 - Client reads `<Data>` (skip since no data transferred)
 - Client sends `<Header type>` == `02`
-- Client sends `<Header message_id=513, type=1, compress=0, length=4` == `02 01` `01` `00` `00 00 00 04`
+- Client sends `<Header message_id=513, type=1, compress=0, length=8` == `02 01` `01` `00` `00 00 00 08`
+- Client sends `<Message Header>` == `7B 7D 00 00`
 - Client sends `<Data>` == `74727565`  _(`true` json object)_
 - Server reads `<Header type>` == `02`
 - Server reads `<Header>`
+- Server reads `<Message Header>`
 - Server reads `<Data>`
 - ...
 
-+ Server calculates JSON string length == `17 bytes`
++ Server calculates JSON string length == `17 bytes` + `4 bytes` message header _(including two empty bytes)_
 + ...
+
+## Speed Limiter
+
+If client wants to limit download speed it must send `05` _(header type 5)_ and `4 bytes unsigned int` - the amount of
+bytes per seconds.
+
+- The default speed limit for connection: 1 << 25 (32 MB).
+- If you send `00 00 00 00` - there will be no speed limit.
+- Speed limit must be `0` or in range `1KB - 32MB` \[1024 .. 33_554_432 bytes\]
