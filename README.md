@@ -82,8 +82,7 @@ Code: `0x02`
 
 ### Different status
 
-By default, "status" field is set to 200. If you want to change it you may want to create your own Request() instance
-and send it manually, but if you wish to use "return" syntax you may also return `Tuple[result: Any, status: int]`
+By default, response "status" field is set to 200. You may change it like this `return Response(data, status=500)`
 
 ## Class handlers
 
@@ -444,7 +443,7 @@ Client wants to send no headers - therefore empty JSON `{}`
 + Client reads data length from `<Header>` == `00000011`
 + Client reads `<Message Header>` and `<Data>` with length of `17 bytes`
 
-### Streaming request behavior**
+### Streaming request behavior
 
 **In comparison with basic behavior**
 
