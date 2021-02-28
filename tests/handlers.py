@@ -4,8 +4,8 @@ from asyncio import sleep
 from rest_framework.fields import CharField, IntegerField
 from rest_framework.serializers import Serializer
 
-from cats import Api, Handler, Request, Response, StreamResponse
 from cats.codecs import Codec
+from cats.server import Api, Handler, Request, Response, StreamResponse
 
 api = Api()
 
@@ -39,11 +39,10 @@ class VersionedHandler3(Handler, api=api, id=2, version=6):
 async def delayed_response(request: Request):
     async def gen():
         yield b'hello'
-        await sleep(0.5)
+        await sleep(0.1)
         yield b' world'
-        await sleep(0.5)
+        await sleep(0.1)
         yield b'!'
-
     return StreamResponse(gen(), Codec.T_BYTE)
 
 

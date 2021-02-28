@@ -8,8 +8,8 @@ import ujson
 
 from cats.codecs import Codec, Json
 from cats.headers import Headers
-from cats.request import InputRequest, Request
-from cats.response import Response
+from cats.server.request import InputRequest, Request
+from cats.server.response import Response
 
 try:
     from django.db.models import QuerySet

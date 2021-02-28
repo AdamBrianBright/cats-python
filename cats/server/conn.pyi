@@ -1,10 +1,13 @@
 from asyncio import BaseEventLoop, Future, Task
-from typing import Any, AsyncIterable, Dict, Iterable, List, Optional, Tuple, Union
+from contextlib import asynccontextmanager
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from sentry_sdk import Scope
 from tornado.iostream import IOStream
 
-from cats import Application, BaseRequest, HandlerFunc, Headers, Identity, InputRequest, Request
+from cats import Headers, Identity
+from cats.server import Application, BaseRequest, HandlerFunc, InputRequest, Request
+from cats.typing import BytesAnyGen
 
 
 class Connection:
@@ -43,11 +46,12 @@ class Connection:
 
     async def set_download_speed(self, speed: int = 0): ...
 
-    async def send(self, handler_id: int, data: Any, headers: Headers = None,
-                   message_id: int = None, status: int = None) -> None: ...
+    async def send(self, handler_id: int, data: Any, headers: Union[Dict[str, Any], Headers] = None,
+                   message_id: int = None, status: int = None, compression: int = None) -> None: ...
 
-    async def send_stream(self, handler_id: int, data: Union[AsyncIterable[bytes], Iterable[bytes]], data_type: int,
-                          headers: Headers = None, message_id: int = None, status: int = None) -> None: ...
+    async def send_stream(self, handler_id: int, data: BytesAnyGen, data_type: int,
+                          headers: Union[Dict[str, Any], Headers] = None,
+                          message_id: int = None, status: int = None, compression: int = None) -> None: ...
 
     def on_tick_done(self, task: Task): ...
 
@@ -87,3 +91,6 @@ class Connection:
     def reset_idle_timer(self) -> None: ...
 
     def _get_free_message_id(self) -> int: ...
+
+    @asynccontextmanager
+    async def lock_write(self): ...

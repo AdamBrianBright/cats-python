@@ -24,8 +24,9 @@ poetry add cats-python
 # Get Started
 
 ```python
-from cats import Api, Application, Event, Request, Server, Response
-from cats.middleware import default_error_handler
+from cats import Event
+from cats.server import Api, Application, Request, Server, Response
+from cats.server.middleware import default_error_handler
 
 api = Api()
 
@@ -91,17 +92,17 @@ since it behave mostly like `@cats.handler.__call__()` decorator. If you want to
 place `cats.Handler` at the right
 
 ```python
-import cats
+from cats.server import Api, Handler, Response
 
 # CatsHandler - your custom abstract class that may add some common features
 from utils import CatsHandler
 
-api = cats.Api()
+api = Api()
 
 
-class EchoHandler(CatsHandler, cats.Handler, api=api, id=0xAFAF):
-    async def handle(self):
-        return cats.Response(self.request.data)
+class EchoHandler(CatsHandler, Handler, api=api, id=0xAFAF):
+  async def handle(self):
+    return Response(self.request.data)
 ```
 
 ## JSON validation
@@ -111,14 +112,14 @@ Packet currently support only DRF serializers.
 > _Notice!_ json_dump is also an alias for `Response` creation
 
 ```python
-import cats
+from cats.server import Api, Handler
 from rest_framework.serializers import Serializer, IntegerField, CharField
 
-api = cats.Api()
+api = Api()
 
 
-class UserSignIn(cats.Handler, api=api, id=0xFAFA):
-    class Loader(Serializer):
+class UserSignIn(Handler, api=api, id=0xFAFA):
+  class Loader(Serializer):
         id = IntegerField()
         name = CharField(max_length=32)
 
@@ -134,26 +135,26 @@ class UserSignIn(cats.Handler, api=api, id=0xFAFA):
 CATS also support nested data transfer inside single handler
 
 ```python
-import cats
+from cats.server import Api, Request, InputRequest, Response, Handler
 
-api = cats.Api()
+api = Api()
 
 
 @api.on(1)
-async def lazy_handler(request: cats.Request):
-    user = request.data
-    res: cats.InputRequest = await request.input(b'Enter One-Time password')
-    return cats.Response({
-        'username': user['username'],
-        'token': 'asfbc96aecb9aeaf6aefabced',
-        'code': res.data['code'],
-    })
+async def lazy_handler(request: Request):
+  user = request.data
+  res: InputRequest = await request.input(b'Enter One-Time password')
+  return Response({
+    'username': user['username'],
+    'token': 'asfbc96aecb9aeaf6aefabced',
+    'code': res.data['code'],
+  })
 
 
-class SomeHandler(cats.Handler, api=api, id=520):
-    async def handle(self):
-        res = await self.input({'action': 'confirm'})
-        return cats.Response({'ok': True})
+class SomeHandler(Handler, api=api, id=520):
+  async def handle(self):
+    res = await self.input({'action': 'confirm'})
+    return Response({'ok': True})
 ```
 
 ## API Versioning
@@ -168,29 +169,29 @@ You may have multiple handlers assigned to a single ID but version parameter mus
 Client provide version only once at connection establishment
 
 ```python
-import cats
+from cats.server import Api, Request
 
-api = cats.Api()
+api = Api()
 
 
 @api.on(1, version=0)
-async def first_version(request: cats.Request):
-    pass
+async def first_version(request: Request):
+  pass
 
 
 @api.on(1, version=2, end_version=3)
-async def second_version(request: cats.Request):
-    pass
+async def second_version(request: Request):
+  pass
 
 
 @api.on(1, version=5, end_version=7)
-async def third_version(request: cats.Request):
-    pass
+async def third_version(request: Request):
+  pass
 
 
 @api.on(1, version=9)
-async def last_version(request: cats.Request):
-    pass
+async def last_version(request: Request):
+  pass
 ```
 
 Handlers from above will be called accordingly table below
@@ -216,22 +217,22 @@ All connections are assigned to channel `__all__` and can also be assigned to di
 to some or every connection in channels
 
 ```python
-import cats
+from cats.server import Request, Connection, Application
 
 
-async def handle(request: cats.Request):
-    conn: cats.Connection = request.conn
-    app: cats.Application = conn.app
+async def handle(request: Request):
+  conn: Connection = request.conn
+  app: Application = conn.app
 
-    # Send to every conn in channel
-    for conn in app.channel('__all__'):
-        await conn.send(request.handler_id, b'Hello everybody!')
+  # Send to every conn in channel
+  for conn in app.channel('__all__'):
+    await conn.send(request.handler_id, b'Hello everybody!')
 
-    # Add to channel
-    app.attach_conn_to_channel(request.conn, 'chat #0101')
-    conn.attach_to_channel('chat #0101')
+  # Add to channel
+  app.attach_conn_to_channel(request.conn, 'chat #0101')
+  conn.attach_to_channel('chat #0101')
 
-    # Remove from channel
+  # Remove from channel
     app.detach_conn_from_channel(request.conn, 'chat #0101')
     conn.detach_from_channel('chat #0101')
 
@@ -241,8 +242,8 @@ async def handle(request: cats.Request):
 
     # Get all channels (warning, in this example same message may be send multiple times)
     for channel in app.channels():
-        for conn in app.channel(channel):
-            await conn.send(0, b'Hello!', request.message_id)
+      for conn in app.channel(channel):
+        await conn.send(0, b'Hello!', message_id=request.message_id)
 ```
 
 ## Events
@@ -250,17 +251,18 @@ async def handle(request: cats.Request):
 Events allow you to mark which function to call if something happened
 
 ```python
-import cats
+from cats import Event
+from cats.server import Request, Application
 
 
 # on handle error
-async def error_handler(request: cats.Request, exc: Exception = None):
-    if isinstance(exc, AssertionError):
-        print(f'Assertion error occurred during handling request {request}')
+async def error_handler(request: Request, exc: Exception = None):
+  if isinstance(exc, AssertionError):
+    print(f'Assertion error occurred during handling request {request}')
 
 
-app = cats.Application([])
-app.add_event_listener(cats.Event.ON_HANDLE_ERROR, error_handler)
+app = Application([])
+app.add_event_listener(Event.ON_HANDLE_ERROR, error_handler)
 ```
 
 Supported events list:
@@ -279,10 +281,11 @@ You may add handshake stage between connection and message exchange stages. To d
 of `Handshake` class to the server instance:
 
 ```python
-import cats
+from cats.server import Application, Server
+from cats.handshake import SHA256TimeHandshake
 
-handshake = cats.SHA256TimeHandshake(b'some secret key', 1, 5.0)
-server = cats.Server(cats.Application([]), handshake)
+handshake = SHA256TimeHandshake(b'some secret key', 1, 5.0)
+server = Server(Application([]), handshake)
 ```
 
 If failed, handshake must raise `cats.handshake.HandshakeError` exception

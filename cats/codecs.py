@@ -40,7 +40,18 @@ class FileInfo:
     mime: Optional[str]
 
 
-Files = Dict[str, FileInfo]
+class Files(dict):
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        for k, v in self.items():
+            if not isinstance(k, str):
+                raise ValueError('File key must be string')
+            elif not isinstance(v, FileInfo):
+                raise ValueError('File value must be FileInfo')
+
+    def __del__(self):
+        for v in self.values():
+            v.path.unlink(missing_ok=True)
 
 
 class BaseCodec:
@@ -124,7 +135,7 @@ class FileCodec(BaseCodec):
         return FileInfo(path.name, path, getsize(path.as_posix()), None)
 
     @classmethod
-    def normalize_input(cls, data: FILE_TYPES) -> Files:
+    def normalize_input(cls, data: FILE_TYPES) -> Dict[str, FileInfo]:
         if isinstance(data, Path):
             data = cls.path_to_file_info(data)
         elif isinstance(data, list):
@@ -180,7 +191,7 @@ class FileCodec(BaseCodec):
 
     @classmethod
     async def decode(cls, data: Union[Path, bytes, bytearray], headers) -> Files:
-        result = {}
+        result = Files()
         buff = data.open('rb') if isinstance(data, Path) else BytesIO(data)
 
         try:
