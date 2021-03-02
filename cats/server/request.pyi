@@ -53,25 +53,26 @@ class BasicRequest(BaseRequest, metaclass=ABCMeta):
     async def recv_data(self) -> None: ...
 
 
-class Request(BasicRequest, type_id=0x00, struct=Struct('>HHHQBBI')):
-    __slots__ = ('handler_id', 'status', 'send_time', 'data_type', 'data_len', 'compression')
+class Request(BasicRequest, type_id=0x00, struct=Struct('>HHQBBI')):
+    __slots__ = ('handler_id', 'send_time', 'data_type', 'data_len', 'compression')
 
     def __init__(self, conn: Connection, message_id: int, handler_id: int, data_type: int,
-                 status: int = None, send_time: datetime = None, compression: int = 0, data_len: int = 0):
+                 send_time: datetime = None, compression: int = 0, data_len: int = 0):
         self.handler_id = handler_id
-        self.status = status or 200
         self.send_time = send_time or datetime.now(timezone.utc)
         super().__init__(conn=conn, message_id=message_id,
                          compression=compression, data_type=data_type, data_len=data_len)
+
+    @property
+    def status(self) -> Optional[int]: ...
 
     @classmethod
     async def recv_from_conn(cls, conn) -> 'Request': ...
 
 
-class StreamRequest(Request, type_id=0x01, struct=Struct('>HHHQBB')):
-    def __init__(self, conn, message_id: int, handler_id: int, data_type: int,
-                 status: int = None, send_time: datetime = None):
-        super().__init__(conn, message_id, handler_id, data_type, status, send_time)
+class StreamRequest(Request, type_id=0x01, struct=Struct('>HHQBB')):
+    def __init__(self, conn, message_id: int, handler_id: int, data_type: int, send_time: datetime = None):
+        super().__init__(conn, message_id, handler_id, data_type, send_time)
 
     @classmethod
     async def recv_from_conn(cls, conn: Connection) -> 'StreamRequest': ...

@@ -105,7 +105,7 @@ class BasicResponse(BaseResponse, metaclass=ABCMeta):
 
 class Response(BasicResponse):
     __slots__ = ('status', 'handler_id',)
-    struct = Struct('>HHHQBBI')
+    struct = Struct('>HHQBBI')
     header_type = bytes([0])
 
     def __init__(self, data: Any = None, headers: Union[Dict[str, Any], Headers] = None,
@@ -129,11 +129,13 @@ class Response(BasicResponse):
         await self._encode_data(conn)
 
         try:
+            if self.status is not None and 'Status' not in self.headers:
+                self.headers['Status'] = self.status
             message_headers = self.headers.encode() + self.HEADER_SEPARATOR
+
             header = self.header_type + self.struct.pack(
                 self.handler_id,
                 self.message_id,
-                self.status,
                 round(datetime.now().timestamp() * 1000),
                 self.data_type,
                 self.compression,
@@ -150,7 +152,7 @@ class Response(BasicResponse):
 
 
 class StreamResponse(Response):
-    struct = Struct('>HHHQBB')
+    struct = Struct('>HHQBB')
     header_type = bytes([1])
 
     def __init__(self, data: BytesAnyGen, data_type: int, headers: Union[Dict[str, Any], Headers] = None,
@@ -165,11 +167,13 @@ class StreamResponse(Response):
         header = self.header_type + self.struct.pack(
             self.handler_id,
             self.message_id,
-            self.status,
             round(datetime.now().timestamp() * 1000),
             self.data_type,
             self.compression
         )
+
+        if self.status is not None and 'Status' not in self.headers:
+            self.headers['Status'] = self.status
         message_headers = self.headers.encode()
 
         conn.reset_idle_timer()

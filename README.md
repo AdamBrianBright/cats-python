@@ -344,12 +344,11 @@ Message consists of 4 parts: `<Header Type>`, `<Header>`, `<Message Header>` and
 
 **Header type `00`** - basic header
 
-This `<Header>` length is always `20 bytes` and it consists of:
+This `<Header>` length is always `18 bytes` and it consists of:
 
 + Handler id `2 bytes unsigned int` - treat as URI to router
 + Message id `2 bytes unsigned int` - unique (sender side generated) message ID. used to match unordered requests and
   responses
-+ Status `2 bytes unsigned int` - treat as HTTP Status Code analog
 + Time `8 bytes unsigned int` - unix timestamp in milliseconds UTC - show when `.write()` was triggered at sender side
 + Data type `1 byte unsigned int` - treat as HTTP `Content-Type` header. Supported types:
   + 0x`00000000` - plain bytes
@@ -362,7 +361,7 @@ This `<Header>` length is always `20 bytes` and it consists of:
 
 **Header type `01`** - streaming header
 
-This `<Header>` length is always `16 bytes` and it is same as `Header type 00` but without *Data length*
+This `<Header>` length is always `14 bytes` and it is same as `Header type 00` but without *Data length*
 `4 bytes unsigned int`
 
 `<Message Header>` here shows as a first chunk _(learn about chunks below)_
@@ -395,6 +394,7 @@ There are no response-only header currently supported
 
 - `"Files": [{"key": str, "name": str, "size": int, "type": str?}]` [1] - This header is being used when `<Data Type>`
   in packet header is set to `FILES - 0x02`
+- `"Status": int` - HTTP Status code analog. Usually only used by a server to show client if there was any error or not.
 
 > [1] Using "Offset" header for the handler that returns `FILES` will also decrease "size" fields in "Files" response header.
 > If "size" will drop to zero, then file won't appear in "Files" header.
@@ -413,16 +413,15 @@ Client wants to send no headers - therefore empty JSON `{}`
 + Client constructs `<Header>` with:
   + `Handler id = 0` == `00` `00`
   + `Message id = 513` == `02` `01`
-  + `Status = 200` == `00` `C8` (in request may be anything, even `00` `00`)
   + `Time = 1608552317314`  == `00` `00` `01` `76` `85` `30` `81` `82` _12/21/2020 @ 12:05pm (UTC)_
   + `Data type = 1` == `01`
   + `Compression type = 0` == `00`
   + `Data length = 30` == `00` `00` `00` `1E`
 + Client send `<Header type>` == `00`
-+ Client sends `<Header>` == `0000` `0201` `00C8` `0000017685308182` `01` `00` `0000001E`
++ Client sends `<Header>` == `0000` `0201` `0000017685308182` `01` `00` `0000001E`
 + Client sends `<Message Header>` == `7B7D` `0000`
 + Client sends `<Data>` == `7B226163636573735F746F6B656E223A2022616263646566227D`
-+ Server waits for `20 bytes` of `<Header>`
++ Server waits for `18 bytes` of `<Header>`
 + Server reads data length from `<Header>` == `0000001E`
 + Server reads `<Payload>` with length of `30 bytes`
 + Server splits `<Payload>` onto `<Message Header>` and `<Data>` using `00 00` _(two empty bytes)_ separator
@@ -433,13 +432,12 @@ Client wants to send no headers - therefore empty JSON `{}`
 + Server constructs `<Header>` with:
   + `Handler id = 0` == `00` `00` (same as request since it is the same handler)
   + `Message id = 513` == `02 01` (same as in request since we respond and not request)
-  + `Status = 200` == `00` `C8` (200 as in HTTP == Success)
   + `Time = 1608552317914`  == `00` `00` `01` `76` `85` `30` `83` `DA` _(plus 600ms)_
   + `Data type = 1` == `01`
   + `Compression type = 0` == `00`
   + `Data length = 17` == `00` `00` `00` `15`
 + Server sends `<Header type>` == `00`
-+ Server sends `<Header>` == `0000` `0201` `00C8` `00000176853083DA` `01` `00` `00000015`
++ Server sends `<Header>` == `0000` `0201` `00000176853083DA` `01` `00` `00000015`
 + Server sends `<Message Header>` == `7B7D` `0000`
 + Server sends `<Data>` == `7B2273756363657373223A20747275657D`
 + Client waits for `<Header message_id=513>`
