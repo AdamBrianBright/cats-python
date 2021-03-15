@@ -2,7 +2,7 @@ from abc import ABCMeta
 from collections import defaultdict
 from dataclasses import dataclass
 from types import GeneratorType
-from typing import Any, Awaitable, Callable, DefaultDict, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Awaitable, Callable, DefaultDict, Dict, List, Optional, Set, Tuple, Type, Union
 
 import ujson
 
@@ -29,7 +29,7 @@ __all__ = [
     'Handler',
 ]
 
-HandlerFunc = Callable[[Request], Optional[Union[Any, Tuple[Any, int]]]]
+HandlerFunc = Callable[[Request], Optional[Response]]
 
 
 @dataclass
@@ -100,13 +100,21 @@ class Api:
 
 
 class Handler(metaclass=ABCMeta):
+    handler_id: int
     Loader: Optional[Type[BaseSerializer]] = None
     Dumper: Optional[Type[BaseSerializer]] = None
+
+    required_type: Optional[Union[int, Tuple[int], Set[int], List[int]]] = None
 
     def __init__(self, request: Request):
         self.request = request
 
     def __init_subclass__(cls, /, api: Api, id: int, name: str = None, version: int = None, end_version: int = None):
+        if api is None:
+            return
+
+        assert id is not None
+
         assert cls.Loader is None or (isinstance(cls.Loader, type) and issubclass(cls.Loader, BaseSerializer)), \
             'Handler Loader must be subclass of rest_framework.serializers.BaseSerializer'
         assert cls.Dumper is None or (isinstance(cls.Dumper, type) and issubclass(cls.Dumper, BaseSerializer)), \
@@ -114,12 +122,21 @@ class Handler(metaclass=ABCMeta):
 
         item = HandlerItem(id, name, cls._to_func(), version, end_version)
         api.register(item)
+        cls.handler_id = id
 
     async def prepare(self) -> None:
-        pass
+        if self.required_type is not None:
+            await self._check_required_type()
 
     async def handle(self):
         raise NotImplementedError
+
+    async def _check_required_type(self):
+        types = self.required_type
+        if isinstance(types, int):
+            types = (types,)
+        if self.request.data_type not in types:
+            raise ValueError('Received payload type is not acceptable')
 
     @classmethod
     def _to_func(cls) -> HandlerFunc:

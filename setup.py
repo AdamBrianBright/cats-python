@@ -14,9 +14,9 @@ setuptools.setup(
     packages=setuptools.find_packages(exclude=['tests', 'tests.*']),
     include_package_data=True,
     install_requires=[
-        "tornado >= 3.8",
-        "ujson >= 4.0.1",
-        "sentry-sdk >= 0.19.5",
+        "tornado >= 6.1",
+        "ujson >= 4.0.2",
+        "sentry-sdk >= 0.20.3",
     ],
     use_scm_version=True,
     setup_requires=['setuptools_scm'],
