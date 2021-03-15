@@ -2,7 +2,7 @@ from abc import ABCMeta
 from collections import defaultdict
 from dataclasses import dataclass
 from types import GeneratorType
-from typing import Any, Awaitable, Callable, DefaultDict, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Awaitable, Callable, Coroutine, DefaultDict, Dict, List, Optional, Set, Tuple, Type, Union
 
 import ujson
 
@@ -29,7 +29,7 @@ __all__ = [
     'Handler',
 ]
 
-HandlerFunc = Callable[[Request], Optional[Response]]
+HandlerFunc = Callable[[Request], Coroutine[Optional[Response]]]
 
 
 @dataclass
@@ -101,9 +101,9 @@ class Api:
 
 class Handler(metaclass=ABCMeta):
     handler_id: int
+
     Loader: Optional[Type[BaseSerializer]] = None
     Dumper: Optional[Type[BaseSerializer]] = None
-
     required_type: Optional[Union[int, Tuple[int], Set[int], List[int]]] = None
 
     def __init__(self, request: Request):
@@ -140,27 +140,31 @@ class Handler(metaclass=ABCMeta):
 
     @classmethod
     def _to_func(cls) -> HandlerFunc:
-        async def wrapper(*args, **kwargs):
-            handler = cls(*args, **kwargs)
+        async def wrapper(request: Request) -> Optional[Response]:
+            handler = cls(request=request)
             await handler.prepare()
             return await handler.handle()
 
         return wrapper
 
-    async def json_load(self) -> Json:
+    async def json_load(self, many: bool = False) -> Json:
         if self.request.data_type != Codec.T_JSON:
             raise TypeError('Unsupported data type. Expected JSON')
 
         data = self.request.data
         if self.Loader is not None:
-            form = self.Loader(data=data, many=isinstance(data, list))
+            if many is None:
+                many = isinstance(data, list)
+            form = self.Loader(data=data, many=many)
             form.is_valid(raise_exception=True)
             return form.validated_data
         else:
             return data
 
-    async def json_dump(self, data, headers: Headers = None, status: int = 200) -> Response:
-        many = isinstance(data, (list, tuple, set, QuerySet, GeneratorType))
+    async def json_dump(self, data, headers: Union[Dict[str, Any], Headers] = None,
+                        status: int = 200, many: bool = None) -> Response:
+        if many is None:
+            many = isinstance(data, (list, tuple, set, QuerySet, GeneratorType))
 
         if self.Dumper is not None:
             data = self.Dumper(data, many=many).data

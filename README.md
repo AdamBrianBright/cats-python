@@ -120,14 +120,14 @@ api = Api()
 
 class UserSignIn(Handler, api=api, id=0xFAFA):
   class Loader(Serializer):
-        id = IntegerField()
-        name = CharField(max_length=32)
+    id = IntegerField()
+    name = CharField(max_length=32)
 
-    Dumper = Loader
+  Dumper = Loader
 
-    async def handle(self):
-        data = await self.json_load()
-        return await self.json_dump(data)
+  async def handle(self):
+    data = await self.json_load(many=False)
+    return await self.json_dump(data, headers={'Reason': 'Echo'}, status=301, many=False)
 ```
 
 ## Children request
