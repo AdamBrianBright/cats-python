@@ -2,14 +2,14 @@ from abc import ABCMeta
 from collections import defaultdict
 from dataclasses import dataclass
 from types import GeneratorType
-from typing import Any, Awaitable, Callable, DefaultDict, Dict, List, Optional, Tuple, Type, Union
+from typing import Any, Awaitable, Callable, Coroutine, DefaultDict, Dict, List, Optional, Set, Tuple, Type, Union
 
 import ujson
 
 from cats.codecs import Codec, Json
 from cats.headers import Headers
-from cats.request import InputRequest, Request
-from cats.response import Response
+from cats.server.request import InputRequest, Request
+from cats.server.response import Response
 
 try:
     from django.db.models import QuerySet
@@ -29,7 +29,7 @@ __all__ = [
     'Handler',
 ]
 
-HandlerFunc = Callable[[Request], Optional[Union[Any, Tuple[Any, int]]]]
+HandlerFunc = Callable[[Request], Coroutine[Optional[Response]]]
 
 
 @dataclass
@@ -100,13 +100,21 @@ class Api:
 
 
 class Handler(metaclass=ABCMeta):
+    handler_id: int
+
     Loader: Optional[Type[BaseSerializer]] = None
     Dumper: Optional[Type[BaseSerializer]] = None
+    required_type: Optional[Union[int, Tuple[int], Set[int], List[int]]] = None
 
     def __init__(self, request: Request):
         self.request = request
 
     def __init_subclass__(cls, /, api: Api, id: int, name: str = None, version: int = None, end_version: int = None):
+        if api is None:
+            return
+
+        assert id is not None
+
         assert cls.Loader is None or (isinstance(cls.Loader, type) and issubclass(cls.Loader, BaseSerializer)), \
             'Handler Loader must be subclass of rest_framework.serializers.BaseSerializer'
         assert cls.Dumper is None or (isinstance(cls.Dumper, type) and issubclass(cls.Dumper, BaseSerializer)), \
@@ -114,36 +122,49 @@ class Handler(metaclass=ABCMeta):
 
         item = HandlerItem(id, name, cls._to_func(), version, end_version)
         api.register(item)
+        cls.handler_id = id
 
     async def prepare(self) -> None:
-        pass
+        if self.required_type is not None:
+            await self._check_required_type()
 
     async def handle(self):
         raise NotImplementedError
 
+    async def _check_required_type(self):
+        types = self.required_type
+        if isinstance(types, int):
+            types = (types,)
+        if self.request.data_type not in types:
+            raise ValueError('Received payload type is not acceptable')
+
     @classmethod
     def _to_func(cls) -> HandlerFunc:
-        async def wrapper(*args, **kwargs):
-            handler = cls(*args, **kwargs)
+        async def wrapper(request: Request) -> Optional[Response]:
+            handler = cls(request=request)
             await handler.prepare()
             return await handler.handle()
 
         return wrapper
 
-    async def json_load(self) -> Json:
+    async def json_load(self, many: bool = False) -> Json:
         if self.request.data_type != Codec.T_JSON:
             raise TypeError('Unsupported data type. Expected JSON')
 
         data = self.request.data
         if self.Loader is not None:
-            form = self.Loader(data=data, many=isinstance(data, list))
+            if many is None:
+                many = isinstance(data, list)
+            form = self.Loader(data=data, many=many)
             form.is_valid(raise_exception=True)
             return form.validated_data
         else:
             return data
 
-    async def json_dump(self, data, headers: Headers = None, status: int = 200) -> Response:
-        many = isinstance(data, (list, tuple, set, QuerySet, GeneratorType))
+    async def json_dump(self, data, headers: Union[Dict[str, Any], Headers] = None,
+                        status: int = 200, many: bool = None) -> Response:
+        if many is None:
+            many = isinstance(data, (list, tuple, set, QuerySet, GeneratorType))
 
         if self.Dumper is not None:
             data = self.Dumper(data, many=many).data

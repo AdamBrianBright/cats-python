@@ -5,7 +5,8 @@ from datetime import datetime
 from pytest import mark, raises
 from tornado.iostream import IOStream, StreamClosedError
 
-from cats import Connection, FileInfo, InputRequest, Request, StreamRequest
+from cats.codecs import FileInfo
+from cats.server import Connection, InputRequest, Request, StreamRequest
 from cats.utils import tmp_file
 from tests.utils import init_cats_conn
 

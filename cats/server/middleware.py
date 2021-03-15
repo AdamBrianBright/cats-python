@@ -3,9 +3,9 @@ from typing import Any, Callable, Optional
 
 from tornado.iostream import StreamClosedError
 
-from cats.handlers import HandlerFunc
-from cats.request import Request
-from cats.response import Response
+from cats.server.handlers import HandlerFunc
+from cats.server.request import Request
+from cats.server.response import Response
 
 __all__ = [
     'Middleware',

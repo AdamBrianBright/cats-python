@@ -2,9 +2,9 @@ from collections import defaultdict
 from inspect import isawaitable
 from typing import Callable, DefaultDict, Iterable, List, Optional, Union
 
-from cats.conn import Connection
-from cats.handlers import Api, HandlerFunc, HandlerItem
-from cats.middleware import Middleware, default_error_handler
+from cats.server.conn import Connection
+from cats.server.handlers import Api, HandlerFunc, HandlerItem
+from cats.server.middleware import Middleware, default_error_handler
 
 __all__ = [
     'Application',

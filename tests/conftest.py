@@ -7,11 +7,12 @@ from pytest import fixture, mark
 from tornado.iostream import IOStream
 from tornado.tcpclient import TCPClient
 
-import cats
-import cats.middleware
+import cats.server
+import cats.server.middleware
 from tests.utils import init_cats_conn
 
 logging.basicConfig(level='DEBUG', force=True)
+
 
 # enable_stream_debug()
 
@@ -25,7 +26,7 @@ def event_loop():
 
 
 @fixture(scope='session')
-def cats_api_list() -> List[cats.Api]:
+def cats_api_list() -> List[cats.server.Api]:
     from tests.handlers import api
     return [
         api,
@@ -33,15 +34,15 @@ def cats_api_list() -> List[cats.Api]:
 
 
 @fixture(scope='session')
-def cats_middleware() -> List[cats.middleware.Middleware]:
+def cats_middleware() -> List[cats.server.middleware.Middleware]:
     return [
-        cats.middleware.default_error_handler,
+        cats.server.middleware.default_error_handler,
     ]
 
 
 @fixture(scope='session')
-def cats_app(cats_api_list, cats_middleware) -> cats.Application:
-    app = cats.Application(cats_api_list, cats_middleware)
+def cats_app(cats_api_list, cats_middleware) -> cats.server.Application:
+    app = cats.server.Application(cats_api_list, cats_middleware)
     return app
 
 
@@ -52,8 +53,8 @@ def cats_handshake() -> cats.Handshake:
 
 @fixture(scope='session')
 @mark.asyncio
-async def cats_server(cats_app, cats_handshake) -> cats.Server:
-    cats_server = cats.Server(app=cats_app, handshake=cats_handshake)
+async def cats_server(cats_app, cats_handshake) -> cats.server.Server:
+    cats_server = cats.server.Server(app=cats_app, handshake=cats_handshake)
     cats_server.bind_unused_port()
     cats_server.start(1)
     yield cats_server
@@ -71,7 +72,7 @@ async def cats_client_stream(cats_server) -> IOStream:
 
 @fixture
 @mark.asyncio
-async def cats_conn(cats_client_stream, cats_server, cats_app) -> cats.Connection:
+async def cats_conn(cats_client_stream, cats_server, cats_app) -> cats.server.Connection:
     conn = await init_cats_conn(cats_client_stream, '127.0.0.1', cats_server.port, cats_app, 1, cats_server.handshake)
     yield conn
     conn.close()

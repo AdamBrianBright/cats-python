@@ -24,8 +24,9 @@ poetry add cats-python
 # Get Started
 
 ```python
-from cats import Api, Application, Event, Request, Server, Response
-from cats.middleware import default_error_handler
+from cats import Event
+from cats.server import Api, Application, Request, Server, Response
+from cats.server.middleware import default_error_handler
 
 api = Api()
 
@@ -91,17 +92,17 @@ since it behave mostly like `@cats.handler.__call__()` decorator. If you want to
 place `cats.Handler` at the right
 
 ```python
-import cats
+from cats.server import Api, Handler, Response
 
 # CatsHandler - your custom abstract class that may add some common features
 from utils import CatsHandler
 
-api = cats.Api()
+api = Api()
 
 
-class EchoHandler(CatsHandler, cats.Handler, api=api, id=0xAFAF):
-    async def handle(self):
-        return cats.Response(self.request.data)
+class EchoHandler(CatsHandler, Handler, api=api, id=0xAFAF):
+  async def handle(self):
+    return Response(self.request.data)
 ```
 
 ## JSON validation
@@ -111,22 +112,22 @@ Packet currently support only DRF serializers.
 > _Notice!_ json_dump is also an alias for `Response` creation
 
 ```python
-import cats
+from cats.server import Api, Handler
 from rest_framework.serializers import Serializer, IntegerField, CharField
 
-api = cats.Api()
+api = Api()
 
 
-class UserSignIn(cats.Handler, api=api, id=0xFAFA):
-    class Loader(Serializer):
-        id = IntegerField()
-        name = CharField(max_length=32)
+class UserSignIn(Handler, api=api, id=0xFAFA):
+  class Loader(Serializer):
+    id = IntegerField()
+    name = CharField(max_length=32)
 
-    Dumper = Loader
+  Dumper = Loader
 
-    async def handle(self):
-        data = await self.json_load()
-        return await self.json_dump(data)
+  async def handle(self):
+    data = await self.json_load(many=False)
+    return await self.json_dump(data, headers={'Reason': 'Echo'}, status=301, many=False)
 ```
 
 ## Children request
@@ -134,26 +135,26 @@ class UserSignIn(cats.Handler, api=api, id=0xFAFA):
 CATS also support nested data transfer inside single handler
 
 ```python
-import cats
+from cats.server import Api, Request, InputRequest, Response, Handler
 
-api = cats.Api()
+api = Api()
 
 
 @api.on(1)
-async def lazy_handler(request: cats.Request):
-    user = request.data
-    res: cats.InputRequest = await request.input(b'Enter One-Time password')
-    return cats.Response({
-        'username': user['username'],
-        'token': 'asfbc96aecb9aeaf6aefabced',
-        'code': res.data['code'],
-    })
+async def lazy_handler(request: Request):
+  user = request.data
+  res: InputRequest = await request.input(b'Enter One-Time password')
+  return Response({
+    'username': user['username'],
+    'token': 'asfbc96aecb9aeaf6aefabced',
+    'code': res.data['code'],
+  })
 
 
-class SomeHandler(cats.Handler, api=api, id=520):
-    async def handle(self):
-        res = await self.input({'action': 'confirm'})
-        return cats.Response({'ok': True})
+class SomeHandler(Handler, api=api, id=520):
+  async def handle(self):
+    res = await self.input({'action': 'confirm'})
+    return Response({'ok': True})
 ```
 
 ## API Versioning
@@ -168,29 +169,29 @@ You may have multiple handlers assigned to a single ID but version parameter mus
 Client provide version only once at connection establishment
 
 ```python
-import cats
+from cats.server import Api, Request
 
-api = cats.Api()
+api = Api()
 
 
 @api.on(1, version=0)
-async def first_version(request: cats.Request):
-    pass
+async def first_version(request: Request):
+  pass
 
 
 @api.on(1, version=2, end_version=3)
-async def second_version(request: cats.Request):
-    pass
+async def second_version(request: Request):
+  pass
 
 
 @api.on(1, version=5, end_version=7)
-async def third_version(request: cats.Request):
-    pass
+async def third_version(request: Request):
+  pass
 
 
 @api.on(1, version=9)
-async def last_version(request: cats.Request):
-    pass
+async def last_version(request: Request):
+  pass
 ```
 
 Handlers from above will be called accordingly table below
@@ -216,22 +217,22 @@ All connections are assigned to channel `__all__` and can also be assigned to di
 to some or every connection in channels
 
 ```python
-import cats
+from cats.server import Request, Connection, Application
 
 
-async def handle(request: cats.Request):
-    conn: cats.Connection = request.conn
-    app: cats.Application = conn.app
+async def handle(request: Request):
+  conn: Connection = request.conn
+  app: Application = conn.app
 
-    # Send to every conn in channel
-    for conn in app.channel('__all__'):
-        await conn.send(request.handler_id, b'Hello everybody!')
+  # Send to every conn in channel
+  for conn in app.channel('__all__'):
+    await conn.send(request.handler_id, b'Hello everybody!')
 
-    # Add to channel
-    app.attach_conn_to_channel(request.conn, 'chat #0101')
-    conn.attach_to_channel('chat #0101')
+  # Add to channel
+  app.attach_conn_to_channel(request.conn, 'chat #0101')
+  conn.attach_to_channel('chat #0101')
 
-    # Remove from channel
+  # Remove from channel
     app.detach_conn_from_channel(request.conn, 'chat #0101')
     conn.detach_from_channel('chat #0101')
 
@@ -241,8 +242,8 @@ async def handle(request: cats.Request):
 
     # Get all channels (warning, in this example same message may be send multiple times)
     for channel in app.channels():
-        for conn in app.channel(channel):
-            await conn.send(0, b'Hello!', request.message_id)
+      for conn in app.channel(channel):
+        await conn.send(0, b'Hello!', message_id=request.message_id)
 ```
 
 ## Events
@@ -250,17 +251,18 @@ async def handle(request: cats.Request):
 Events allow you to mark which function to call if something happened
 
 ```python
-import cats
+from cats import Event
+from cats.server import Request, Application
 
 
 # on handle error
-async def error_handler(request: cats.Request, exc: Exception = None):
-    if isinstance(exc, AssertionError):
-        print(f'Assertion error occurred during handling request {request}')
+async def error_handler(request: Request, exc: Exception = None):
+  if isinstance(exc, AssertionError):
+    print(f'Assertion error occurred during handling request {request}')
 
 
-app = cats.Application([])
-app.add_event_listener(cats.Event.ON_HANDLE_ERROR, error_handler)
+app = Application([])
+app.add_event_listener(Event.ON_HANDLE_ERROR, error_handler)
 ```
 
 Supported events list:
@@ -279,10 +281,11 @@ You may add handshake stage between connection and message exchange stages. To d
 of `Handshake` class to the server instance:
 
 ```python
-import cats
+from cats.server import Application, Server
+from cats.handshake import SHA256TimeHandshake
 
-handshake = cats.SHA256TimeHandshake(b'some secret key', 1, 5.0)
-server = cats.Server(cats.Application([]), handshake)
+handshake = SHA256TimeHandshake(b'some secret key', 1, 5.0)
+server = Server(Application([]), handshake)
 ```
 
 If failed, handshake must raise `cats.handshake.HandshakeError` exception
@@ -341,12 +344,11 @@ Message consists of 4 parts: `<Header Type>`, `<Header>`, `<Message Header>` and
 
 **Header type `00`** - basic header
 
-This `<Header>` length is always `20 bytes` and it consists of:
+This `<Header>` length is always `18 bytes` and it consists of:
 
 + Handler id `2 bytes unsigned int` - treat as URI to router
 + Message id `2 bytes unsigned int` - unique (sender side generated) message ID. used to match unordered requests and
   responses
-+ Status `2 bytes unsigned int` - treat as HTTP Status Code analog
 + Time `8 bytes unsigned int` - unix timestamp in milliseconds UTC - show when `.write()` was triggered at sender side
 + Data type `1 byte unsigned int` - treat as HTTP `Content-Type` header. Supported types:
   + 0x`00000000` - plain bytes
@@ -359,7 +361,7 @@ This `<Header>` length is always `20 bytes` and it consists of:
 
 **Header type `01`** - streaming header
 
-This `<Header>` length is always `16 bytes` and it is same as `Header type 00` but without *Data length*
+This `<Header>` length is always `14 bytes` and it is same as `Header type 00` but without *Data length*
 `4 bytes unsigned int`
 
 `<Message Header>` here shows as a first chunk _(learn about chunks below)_
@@ -392,6 +394,7 @@ There are no response-only header currently supported
 
 - `"Files": [{"key": str, "name": str, "size": int, "type": str?}]` [1] - This header is being used when `<Data Type>`
   in packet header is set to `FILES - 0x02`
+- `"Status": int` - HTTP Status code analog. Usually only used by a server to show client if there was any error or not.
 
 > [1] Using "Offset" header for the handler that returns `FILES` will also decrease "size" fields in "Files" response header.
 > If "size" will drop to zero, then file won't appear in "Files" header.
@@ -410,16 +413,15 @@ Client wants to send no headers - therefore empty JSON `{}`
 + Client constructs `<Header>` with:
   + `Handler id = 0` == `00` `00`
   + `Message id = 513` == `02` `01`
-  + `Status = 200` == `00` `C8` (in request may be anything, even `00` `00`)
   + `Time = 1608552317314`  == `00` `00` `01` `76` `85` `30` `81` `82` _12/21/2020 @ 12:05pm (UTC)_
   + `Data type = 1` == `01`
   + `Compression type = 0` == `00`
   + `Data length = 30` == `00` `00` `00` `1E`
 + Client send `<Header type>` == `00`
-+ Client sends `<Header>` == `0000` `0201` `00C8` `0000017685308182` `01` `00` `0000001E`
++ Client sends `<Header>` == `0000` `0201` `0000017685308182` `01` `00` `0000001E`
 + Client sends `<Message Header>` == `7B7D` `0000`
 + Client sends `<Data>` == `7B226163636573735F746F6B656E223A2022616263646566227D`
-+ Server waits for `20 bytes` of `<Header>`
++ Server waits for `18 bytes` of `<Header>`
 + Server reads data length from `<Header>` == `0000001E`
 + Server reads `<Payload>` with length of `30 bytes`
 + Server splits `<Payload>` onto `<Message Header>` and `<Data>` using `00 00` _(two empty bytes)_ separator
@@ -430,13 +432,12 @@ Client wants to send no headers - therefore empty JSON `{}`
 + Server constructs `<Header>` with:
   + `Handler id = 0` == `00` `00` (same as request since it is the same handler)
   + `Message id = 513` == `02 01` (same as in request since we respond and not request)
-  + `Status = 200` == `00` `C8` (200 as in HTTP == Success)
   + `Time = 1608552317914`  == `00` `00` `01` `76` `85` `30` `83` `DA` _(plus 600ms)_
   + `Data type = 1` == `01`
   + `Compression type = 0` == `00`
   + `Data length = 17` == `00` `00` `00` `15`
 + Server sends `<Header type>` == `00`
-+ Server sends `<Header>` == `0000` `0201` `00C8` `00000176853083DA` `01` `00` `00000015`
++ Server sends `<Header>` == `0000` `0201` `00000176853083DA` `01` `00` `00000015`
 + Server sends `<Message Header>` == `7B7D` `0000`
 + Server sends `<Data>` == `7B2273756363657373223A20747275657D`
 + Client waits for `<Header message_id=513>`

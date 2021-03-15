@@ -9,10 +9,10 @@ from tornado.iostream import IOStream, StreamClosedError
 from tornado.tcpserver import TCPServer
 from tornado.testing import bind_unused_port
 
-from cats.app import Application
-from cats.conn import Connection
 from cats.events import Event
 from cats.handshake import Handshake
+from cats.server.app import Application
+from cats.server.conn import Connection
 
 __all__ = [
     'Server',

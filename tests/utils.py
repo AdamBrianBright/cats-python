@@ -1,6 +1,7 @@
 from tornado.iostream import IOStream
 
-from cats import Application, Connection, SHA256TimeHandshake
+from cats import SHA256TimeHandshake
+from cats.server import Application, Connection
 
 __all__ = [
     'init_cats_conn',
