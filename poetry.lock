@@ -489,7 +489,7 @@ telegram = ["requests"]
 
 [[package]]
 name = "twine"
-version = "3.3.0"
+version = "3.4.0"
 description = "Collection of utilities for publishing packages on PyPI"
 category = "dev"
 optional = false
@@ -497,7 +497,9 @@ python-versions = ">=3.6"
 
 [package.dependencies]
 colorama = ">=0.4.3"
+importlib-metadata = ">=3.6"
 keyring = ">=15.1"
+packaging = ">=16.2"
 pkginfo = ">=1.4.2"
 readme-renderer = ">=21.0"
 requests = ">=2.20"
@@ -842,8 +844,8 @@ tqdm = [
     {file = "tqdm-4.59.0.tar.gz", hash = "sha256:d666ae29164da3e517fcf125e41d4fe96e5bb375cd87ff9763f6b38b5592fe33"},
 ]
 twine = [
-    {file = "twine-3.3.0-py3-none-any.whl", hash = "sha256:2f6942ec2a17417e19d2dd372fc4faa424c87ee9ce49b4e20c427eb00a0f3f41"},
-    {file = "twine-3.3.0.tar.gz", hash = "sha256:fcffa8fc37e8083a5be0728371f299598870ee1eccc94e9a25cef7b1dcfa8297"},
+    {file = "twine-3.4.0-py3-none-any.whl", hash = "sha256:d12a873ab5db3e21f3fd393a82776401cc43a4966677466088abcb796aefafe2"},
+    {file = "twine-3.4.0.tar.gz", hash = "sha256:101f1c43ea4587ab19261d09157c63b6f37a0e55b215f0dd26304df1d49b620c"},
 ]
 ujson = [
     {file = "ujson-4.0.2-cp36-cp36m-macosx_10_14_x86_64.whl", hash = "sha256:e390df0dcc7897ffb98e17eae1f4c442c39c91814c298ad84d935a3c5c7a32fa"},

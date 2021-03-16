@@ -2,7 +2,7 @@ from abc import ABCMeta
 from collections import defaultdict
 from dataclasses import dataclass
 from types import GeneratorType
-from typing import Any, Awaitable, Callable, Coroutine, DefaultDict, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Awaitable, Callable, DefaultDict, Dict, List, Optional, Set, Tuple, Type, Union
 
 import ujson
 
@@ -29,7 +29,7 @@ __all__ = [
     'Handler',
 ]
 
-HandlerFunc = Callable[[Request], Coroutine[Optional[Response]]]
+HandlerFunc = Callable[[Request], Awaitable[Optional[Response]]]
 
 
 @dataclass
@@ -109,8 +109,10 @@ class Handler(metaclass=ABCMeta):
     def __init__(self, request: Request):
         self.request = request
 
-    def __init_subclass__(cls, /, api: Api, id: int, name: str = None, version: int = None, end_version: int = None):
+    def __init_subclass__(cls, /, api: Api = None, id: int = None,
+                          name: str = None, version: int = None, end_version: int = None):
         if api is None:
+            # abstract, not registered handler
             return
 
         assert id is not None

@@ -136,8 +136,8 @@ class Connection:
     def signed_in(self) -> bool:
         return self._identity is not None
 
-    def sign_in(self, identity: Any):
-        self._identity = identity
+    def sign_in(self, identity: Identity):
+        self._identity: Optional[Identity] = identity
 
         model_group = f'model_{identity.model_name}'
         auth_group = f'{model_group}:{identity.id}'
@@ -162,6 +162,7 @@ class Connection:
             self.detach_from_channel(auth_group)
             self.detach_from_channel(model_group)
 
+            self._identity.sign_out()
             self._identity = None
 
         self._scope.set_user(self.identity_scope_user)
