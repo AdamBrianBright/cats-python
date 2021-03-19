@@ -1,15 +1,13 @@
-from asyncio import CancelledError
-
-__all__ = [
-    'Identity',
-]
-
-
 class Identity:
     __identity_registry__ = []
 
-    id: int
-    model_name: str
+    @property
+    def id(self) -> int:
+        raise NotImplementedError
+
+    @property
+    def model_name(self) -> str:
+        raise NotImplementedError
 
     @property
     def sentry_scope(self) -> dict:
@@ -33,17 +31,6 @@ class Identity:
         pass
 
     @classmethod
-    def sign_in_auto(cls, *args, **kwargs):
-        for identity in cls.__identity_registry__:
-            try:
-                res = identity.sign_in(*args, **kwargs)
-                if res is not None:
-                    return res
-            except (KeyboardInterrupt, CancelledError):
-                raise
-            except Exception:
-                pass
-        return None
+    def sign_in_auto(cls, *args, **kwargs): ...
 
-    def __init_subclass__(cls, **kwargs):
-        cls.__identity_registry__.append(cls)
+    def __init_subclass__(cls, **kwargs): ...

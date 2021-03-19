@@ -1,10 +1,11 @@
 import socket
 import ssl
 from asyncio import CancelledError, get_event_loop
-from datetime import datetime, timezone
+from datetime import datetime
 from logging import getLogger
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+import pytz
 from tornado.iostream import IOStream, StreamClosedError
 from tornado.tcpserver import TCPServer
 from tornado.testing import bind_unused_port
@@ -48,10 +49,11 @@ class Server(TCPServer):
             if conn is not None:
                 conn.close(exc=err)
                 await self.app.trigger(Event.ON_CONN_CLOSE, server=self, conn=conn, exc=err)
-                stream.close(err)
+            stream.close(err)
         else:
             if conn is not None:
                 await self.app.trigger(Event.ON_CONN_CLOSE, server=self, conn=conn)
+            stream.close()
         finally:
             if conn is not None:
                 self.app.remove_conn_from_channels(conn)
@@ -60,7 +62,7 @@ class Server(TCPServer):
     async def init_connection(self, stream: IOStream, address: Tuple[str, int]) -> Connection:
         api_version = int.from_bytes(await stream.read_bytes(4), 'big', signed=False)
 
-        current_time = datetime.now(tz=timezone.utc).timestamp()
+        current_time = datetime.now(tz=pytz.UTC).timestamp()
         await stream.write(round(current_time * 1000).to_bytes(8, 'big', signed=False))
 
         conn = Connection(stream, address, api_version, self.app)
