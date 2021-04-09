@@ -1,5 +1,8 @@
+from typing import List
+
+
 class Identity:
-    __identity_registry__ = []
+    identity_list: List[Identity]
 
     @property
     def id(self) -> int:
@@ -15,22 +18,3 @@ class Identity:
         Must return dict of data that can be used by Sentry
         """
         raise NotImplementedError
-
-    @classmethod
-    def sign_in(cls, *args, **kwargs):
-        """
-        Must return instance of self class if arguments match properly
-        Raise exception otherwise
-        """
-        raise NotImplementedError
-
-    def sign_out(self):
-        """
-        You may implement this method so it will do something if identity.sign_out() triggered
-        """
-        pass
-
-    @classmethod
-    def sign_in_auto(cls, *args, **kwargs): ...
-
-    def __init_subclass__(cls, **kwargs): ...

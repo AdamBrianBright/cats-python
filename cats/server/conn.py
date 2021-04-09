@@ -123,15 +123,7 @@ class Connection:
         if not self.signed_in():
             return {'ip': self.host}
 
-        identity = self.identity
-
-        scope_user = {
-            'id': identity.id,
-            'ip': self.host,
-            'model': identity.model_name,
-            'data': identity.sentry_scope,
-        }
-        return scope_user
+        return self.identity.sentry_scope
 
     def signed_in(self) -> bool:
         return self._identity is not None
@@ -146,9 +138,9 @@ class Connection:
 
         self._scope.set_user(self.identity_scope_user)
         add_breadcrumb(message='Sign in', data={
-            'id': identity.pk,
+            'id': identity.id,
             'model': identity.__class__.__name__,
-            'instance': str(identity),
+            'instance': repr(identity),
         })
 
         logging.debug(f'Signed in as {identity.__class__.__name__} <{self.host}:{self.port}>')
@@ -162,7 +154,6 @@ class Connection:
             self.detach_from_channel(auth_group)
             self.detach_from_channel(model_group)
 
-            self._identity.sign_out()
             self._identity = None
 
         self._scope.set_user(self.identity_scope_user)
