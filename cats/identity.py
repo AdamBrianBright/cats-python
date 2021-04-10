@@ -3,20 +3,22 @@ __all__ = [
 ]
 
 
-class Identity:
-    @property
-    def id(self) -> int:
-        """
-        Must return some sort of pointer that will help other code parts to address to this identity
-        """
-        raise NotImplementedError
+class IdentityMeta(type):
+    __identity_registry__ = []
+
+    def __new__(mcs, name, bases, attrs):
+        cls = super().__new__(mcs, name, bases, attrs)
+        IdentityMeta.__identity_registry__.append(cls)
+        return cls
 
     @property
-    def model_name(self) -> str:
-        """
-        Must return string describing the Identity type. Example: 'user'
-        """
-        raise NotImplementedError
+    def identity_list(cls):
+        return IdentityMeta.__identity_registry__[:]
+
+
+class Identity(metaclass=IdentityMeta):
+    id: int
+    model_name: str
 
     @property
     def sentry_scope(self) -> dict:

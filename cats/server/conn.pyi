@@ -26,7 +26,7 @@ class Connection:
         self.api_version: int
         self._app: Application
         self._scope: Scope
-        self._identity: None
+        self._identity: Optional[Identity] = None
         self.loop: BaseEventLoop
         self.input_queue: Dict[int, Future]
         self._idle_timer: Optional[Future]
@@ -69,7 +69,7 @@ class Connection:
 
     def signed_in(self) -> bool: ...
 
-    def sign_in(self, identity: Any): ...
+    def sign_in(self, identity: Identity): ...
 
     def sign_out(self): ...
 

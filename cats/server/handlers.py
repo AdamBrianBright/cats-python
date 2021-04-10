@@ -2,14 +2,14 @@ from abc import ABCMeta
 from collections import defaultdict
 from dataclasses import dataclass
 from types import GeneratorType
-from typing import Any, Awaitable, Callable, Coroutine, DefaultDict, Dict, List, Optional, Set, Tuple, Type, Union
+from typing import Any, Awaitable, Callable, DefaultDict, Dict, List, Optional, Set, Tuple, Type, Union
 
 import ujson
 
 from cats.codecs import Codec, Json
 from cats.headers import Headers
 from cats.server.request import InputRequest, Request
-from cats.server.response import Response
+from cats.server.response import BaseResponse, Response
 
 try:
     from django.db.models import QuerySet
@@ -29,7 +29,7 @@ __all__ = [
     'Handler',
 ]
 
-HandlerFunc = Callable[[Request], Coroutine[Optional[Response]]]
+HandlerFunc = Callable[[Request], Awaitable[Optional[Response]]]
 
 
 @dataclass
@@ -109,8 +109,10 @@ class Handler(metaclass=ABCMeta):
     def __init__(self, request: Request):
         self.request = request
 
-    def __init_subclass__(cls, /, api: Api, id: int, name: str = None, version: int = None, end_version: int = None):
+    def __init_subclass__(cls, /, api: Api = None, id: int = None,
+                          name: str = None, version: int = None, end_version: int = None):
         if api is None:
+            # abstract, not registered handler
             return
 
         assert id is not None
@@ -120,9 +122,15 @@ class Handler(metaclass=ABCMeta):
         assert cls.Dumper is None or (isinstance(cls.Dumper, type) and issubclass(cls.Dumper, BaseSerializer)), \
             'Handler Dumper must be subclass of rest_framework.serializers.BaseSerializer'
 
-        item = HandlerItem(id, name, cls._to_func(), version, end_version)
+        item = HandlerItem(id, name, cls.run, version, end_version)
         api.register(item)
         cls.handler_id = id
+
+    @classmethod
+    async def run(cls, request: Request) -> Optional[BaseResponse]:
+        h = cls(request=request)
+        await h.prepare()
+        return await h.handle()
 
     async def prepare(self) -> None:
         if self.required_type is not None:
@@ -137,15 +145,6 @@ class Handler(metaclass=ABCMeta):
             types = (types,)
         if self.request.data_type not in types:
             raise ValueError('Received payload type is not acceptable')
-
-    @classmethod
-    def _to_func(cls) -> HandlerFunc:
-        async def wrapper(request: Request) -> Optional[Response]:
-            handler = cls(request=request)
-            await handler.prepare()
-            return await handler.handle()
-
-        return wrapper
 
     async def json_load(self, many: bool = False) -> Json:
         if self.request.data_type != Codec.T_JSON:
