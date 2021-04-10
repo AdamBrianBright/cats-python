@@ -9,7 +9,7 @@ import ujson
 from cats.codecs import Codec, Json
 from cats.headers import Headers
 from cats.server.request import InputRequest, Request
-from cats.server.response import Response
+from cats.server.response import BaseResponse, Response
 
 try:
     from django.db.models import QuerySet
@@ -122,9 +122,15 @@ class Handler(metaclass=ABCMeta):
         assert cls.Dumper is None or (isinstance(cls.Dumper, type) and issubclass(cls.Dumper, BaseSerializer)), \
             'Handler Dumper must be subclass of rest_framework.serializers.BaseSerializer'
 
-        item = HandlerItem(id, name, cls._to_func(), version, end_version)
+        item = HandlerItem(id, name, cls.run, version, end_version)
         api.register(item)
         cls.handler_id = id
+
+    @classmethod
+    async def run(cls, request: Request) -> Optional[BaseResponse]:
+        h = cls(request=request)
+        await h.prepare()
+        return await h.handle()
 
     async def prepare(self) -> None:
         if self.required_type is not None:
@@ -139,15 +145,6 @@ class Handler(metaclass=ABCMeta):
             types = (types,)
         if self.request.data_type not in types:
             raise ValueError('Received payload type is not acceptable')
-
-    @classmethod
-    def _to_func(cls) -> HandlerFunc:
-        async def wrapper(request: Request) -> Optional[Response]:
-            handler = cls(request=request)
-            await handler.prepare()
-            return await handler.handle()
-
-        return wrapper
 
     async def json_load(self, many: bool = False) -> Json:
         if self.request.data_type != Codec.T_JSON:
