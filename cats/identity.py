@@ -1,13 +1,17 @@
+from typing import List, Type
+
 __all__ = [
+    'IdentityMeta',
     'Identity',
 ]
 
 
 class IdentityMeta(type):
-    __identity_registry__ = []
+    __identity_registry__: List[Type['Identity']] = []
 
     def __new__(mcs, name, bases, attrs):
         cls = super().__new__(mcs, name, bases, attrs)
+        # noinspection PyTypeChecker
         IdentityMeta.__identity_registry__.append(cls)
         return cls
 

@@ -1,9 +1,16 @@
-from typing import List
+from typing import List, Type
 
 
-class Identity:
-    identity_list: List[Identity]
+class IdentityMeta(type):
+    __identity_registry__: List[Type['Identity']] = []
 
+    def __new__(mcs, name, bases, attrs): ...
+
+    @property
+    def identity_list(cls) -> List[Type['Identity']]: ...
+
+
+class Identity(metaclass=IdentityMeta):
     @property
     def id(self) -> int:
         raise NotImplementedError
