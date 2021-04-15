@@ -1,7 +1,7 @@
 from abc import ABCMeta
 from datetime import datetime, timezone
 from struct import Struct
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, Optional, Type, Union
 
 from cats.headers import Headers
 from cats.server.conn import Connection
@@ -33,7 +33,7 @@ class BaseRequest(dict):
     @classmethod
     def get_class_by_type_id(cls, message_type: int) -> Optional[Type['BaseRequest']]: ...
 
-    async def input(self, data: Any = None, headers: Headers = None,
+    async def input(self, data: Any = None, headers: Union[Dict[str, Any], Headers] = None,
                     data_type: int = None, compression: int = None) -> 'InputRequest': ...
 
     @classmethod
@@ -88,7 +88,7 @@ class InputRequest(BasicRequest, type_id=0x02, struct=Struct('>HBBI')):
     @classmethod
     async def recv_from_conn(cls, conn: Connection) -> 'InputRequest': ...
 
-    async def answer(self, data: Any = None, headers: Headers = None,
+    async def answer(self, data: Any = None, headers: Union[Dict[str, Any], Headers] = None,
                      compression: int = None, data_type: int = None) -> None: ...
 
 

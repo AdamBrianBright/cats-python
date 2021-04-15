@@ -3,7 +3,7 @@ from abc import ABCMeta
 from asyncio import Future
 from datetime import datetime, timezone
 from struct import Struct
-from typing import Any, Dict, Optional, Type
+from typing import Any, Dict, Optional, Type, Union
 
 from cats.codecs import Codec
 from cats.compression import Compressor
@@ -50,7 +50,7 @@ class BaseRequest(dict):
     def get_class_by_type_id(cls, message_type: int) -> Optional[Type['BaseRequest']]:
         return cls.__registry__.get(message_type)
 
-    async def input(self, data: Any = None, headers: Headers = None,
+    async def input(self, data: Any = None, headers: Union[Dict[str, Any], Headers] = None,
                     data_type: int = None, compression: int = None) -> 'InputRequest':
         fut = Future()
         if self.message_id in self.conn.input_queue:
@@ -243,7 +243,7 @@ class InputRequest(BasicRequest, type_id=0x02, struct=Struct('>HBBI')):
         await request.recv_data()
         return request
 
-    async def answer(self, data: Any = None, headers: Headers = None,
+    async def answer(self, data: Any = None, headers: Union[Dict[str, Any], Headers] = None,
                      compression: int = None, data_type: int = None) -> None:
         response = InputResponse(data=data, headers=headers, compression=compression, data_type=data_type)
         response.message_id = self.message_id
