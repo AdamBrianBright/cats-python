@@ -3,3 +3,6 @@ from .events import *
 from .handshake import *
 from .headers import *
 from .identity import *
+
+version = "2.3.2"
+version_info = (2, 3, 2, 0)
