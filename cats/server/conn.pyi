@@ -15,7 +15,7 @@ class Connection:
 
     __slots__ = (
         '_closed', 'stream', 'host', 'port', 'api_version', '_app', '_scope', 'download_speed',
-        '_identity', 'loop', 'input_queue', '_idle_timer', '_message_pool', 'is_sending',
+        '_identity', '_credentials', 'loop', 'input_queue', '_idle_timer', '_message_pool', 'is_sending',
     )
 
     def __init__(self, stream: IOStream, address: Tuple[str, int], api_version: int, app: Application):
@@ -27,6 +27,7 @@ class Connection:
         self._app: Application
         self._scope: Scope
         self._identity: Optional[Identity] = None
+        self._credentials: Any = None
         self.loop: BaseEventLoop
         self.input_queue: Dict[int, Future]
         self._idle_timer: Optional[Future]
@@ -65,11 +66,14 @@ class Connection:
     def identity(self) -> Optional[Identity]: ...
 
     @property
+    def credentials(self) -> Optional[Any]: ...
+
+    @property
     def identity_scope_user(self): ...
 
     def signed_in(self) -> bool: ...
 
-    def sign_in(self, identity: Identity): ...
+    def sign_in(self, identity: Identity, credentials: Any = None): ...
 
     def sign_out(self): ...
 
