@@ -259,7 +259,7 @@ class Connection:
             if self._idle_timer is not None:
                 self._idle_timer.cancel()
 
-            self._idle_timer = self.loop.call_later(self.app.idle_timeout, partial(self.close, TimeoutError))
+            self._idle_timer = self.loop.call_later(self.app.idle_timeout, partial(self.close, TimeoutError()))
 
     def _get_free_message_id(self) -> int:
         while True:
