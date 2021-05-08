@@ -13,6 +13,7 @@ __all__ = [
 
 class Application:
     __slots__ = ('_handlers', '_middleware', '_events', '_channels', 'idle_timeout', 'input_timeout')
+    INPUT_LIMIT: int = 3
 
     def __init__(self, apis: List[Api], middleware: List[Middleware] = None,
                  idle_timeout: Union[int, float] = None, input_timeout: Union[int, float] = None):

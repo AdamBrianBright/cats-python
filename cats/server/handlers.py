@@ -30,6 +30,7 @@ __all__ = [
 ]
 
 HandlerFunc = Callable[[Request], Awaitable[Optional[Response]]]
+T_Headers = Union[Dict[str, Any], Headers]
 
 
 @dataclass
@@ -45,6 +46,7 @@ class Api:
     def __init__(self):
         self._handlers: DefaultDict[int, List[HandlerItem]] = defaultdict(list)
 
+    # noinspection PyShadowingBuiltins
     def on(self, id: int, name: str = None, version: int = None, end_version: int = None):
         def wrapper(fn: HandlerFunc) -> HandlerFunc:
             self.register(HandlerItem(id, name, fn, version, end_version))
@@ -109,6 +111,7 @@ class Handler(metaclass=ABCMeta):
     def __init__(self, request: Request):
         self.request = request
 
+    # noinspection PyShadowingBuiltins
     def __init_subclass__(cls, /, api: Api = None, id: int = None,
                           name: str = None, version: int = None, end_version: int = None):
         if api is None:
@@ -146,7 +149,7 @@ class Handler(metaclass=ABCMeta):
         if self.request.data_type not in types:
             raise ValueError('Received payload type is not acceptable')
 
-    async def json_load(self, many: bool = False) -> Json:
+    async def json_load(self, *, many: bool = False) -> Json:
         if self.request.data_type != Codec.T_JSON:
             raise TypeError('Unsupported data type. Expected JSON')
 
@@ -160,7 +163,7 @@ class Handler(metaclass=ABCMeta):
         else:
             return data
 
-    async def json_dump(self, data, headers: Union[Dict[str, Any], Headers] = None,
+    async def json_dump(self, data, *, headers: T_Headers = None,
                         status: int = 200, many: bool = None) -> Response:
         if many is None:
             many = isinstance(data, (list, tuple, set, QuerySet, GeneratorType))
@@ -172,5 +175,7 @@ class Handler(metaclass=ABCMeta):
 
         return Response(data=data, headers=headers, status=status)
 
-    def input(self, data: Any) -> Awaitable['InputRequest']:
-        return self.request.input(data=data)
+    def input(self, data: Any = None, data_type: int = None, compression: int = None, *,
+              headers: T_Headers = None, status: int = 200) -> Awaitable['InputRequest']:
+        return self.request.input(data=data, data_type=data_type, compression=compression,
+                                  headers=headers, status=status)

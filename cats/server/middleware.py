@@ -18,8 +18,13 @@ Middleware = Callable[[HandlerFunc, Request], Optional[Any]]
 async def default_error_handler(handler: HandlerFunc, request: Request):
     try:
         return await handler(request)
-    except (KeyboardInterrupt, StreamClosedError, CancelledError):
+    except (KeyboardInterrupt, StreamClosedError):
         raise
+    except CancelledError:
+        return Response(data={
+            'error': 'CancelledError',
+            'message': 'Request was cancelled',
+        }, status=500)
     except Exception as err:
         return Response(data={
             'error': err.__class__.__name__,

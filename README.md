@@ -101,8 +101,8 @@ api = Api()
 
 
 class EchoHandler(CatsHandler, Handler, api=api, id=0xAFAF):
-  async def handle(self):
-    return Response(self.request.data)
+    async def handle(self):
+        return Response(self.request.data)
 ```
 
 ## JSON validation
@@ -119,15 +119,15 @@ api = Api()
 
 
 class UserSignIn(Handler, api=api, id=0xFAFA):
-  class Loader(Serializer):
-    id = IntegerField()
-    name = CharField(max_length=32)
+    class Loader(Serializer):
+        id = IntegerField()
+        name = CharField(max_length=32)
 
-  Dumper = Loader
+    Dumper = Loader
 
-  async def handle(self):
-    data = await self.json_load(many=False)
-    return await self.json_dump(data, headers={'Reason': 'Echo'}, status=301, many=False)
+    async def handle(self):
+        data = await self.json_load(many=False)
+        return await self.json_dump(data, headers={'Reason': 'Echo'}, status=301, many=False)
 ```
 
 ## Children request
@@ -142,19 +142,19 @@ api = Api()
 
 @api.on(1)
 async def lazy_handler(request: Request):
-  user = request.data
-  res: InputRequest = await request.input(b'Enter One-Time password')
-  return Response({
-    'username': user['username'],
-    'token': 'asfbc96aecb9aeaf6aefabced',
-    'code': res.data['code'],
-  })
+    user = request.data
+    res: InputRequest = await request.input(b'Enter One-Time password')
+    return Response({
+        'username': user['username'],
+        'token': 'asfbc96aecb9aeaf6aefabced',
+        'code': res.data['code'],
+    })
 
 
 class SomeHandler(Handler, api=api, id=520):
-  async def handle(self):
-    res = await self.input({'action': 'confirm'})
-    return Response({'ok': True})
+    async def handle(self):
+        res = await self.input({'action': 'confirm'})
+        return Response({'ok': True})
 ```
 
 ## API Versioning
@@ -176,22 +176,22 @@ api = Api()
 
 @api.on(1, version=0)
 async def first_version(request: Request):
-  pass
+    pass
 
 
 @api.on(1, version=2, end_version=3)
 async def second_version(request: Request):
-  pass
+    pass
 
 
 @api.on(1, version=5, end_version=7)
 async def third_version(request: Request):
-  pass
+    pass
 
 
 @api.on(1, version=9)
 async def last_version(request: Request):
-  pass
+    pass
 ```
 
 Handlers from above will be called accordingly table below
@@ -221,18 +221,18 @@ from cats.server import Request, Connection, Application
 
 
 async def handle(request: Request):
-  conn: Connection = request.conn
-  app: Application = conn.app
+    conn: Connection = request.conn
+    app: Application = conn.app
 
-  # Send to every conn in channel
-  for conn in app.channel('__all__'):
-    await conn.send(request.handler_id, b'Hello everybody!')
+    # Send to every conn in channel
+    for conn in app.channel('__all__'):
+        await conn.send(request.handler_id, b'Hello everybody!')
 
-  # Add to channel
-  app.attach_conn_to_channel(request.conn, 'chat #0101')
-  conn.attach_to_channel('chat #0101')
+    # Add to channel
+    app.attach_conn_to_channel(request.conn, 'chat #0101')
+    conn.attach_to_channel('chat #0101')
 
-  # Remove from channel
+    # Remove from channel
     app.detach_conn_from_channel(request.conn, 'chat #0101')
     conn.detach_from_channel('chat #0101')
 
@@ -242,8 +242,8 @@ async def handle(request: Request):
 
     # Get all channels (warning, in this example same message may be send multiple times)
     for channel in app.channels():
-      for conn in app.channel(channel):
-        await conn.send(0, b'Hello!', message_id=request.message_id)
+        for conn in app.channel(channel):
+            await conn.send(0, b'Hello!', message_id=request.message_id)
 ```
 
 ## Events
@@ -257,8 +257,8 @@ from cats.server import Request, Application
 
 # on handle error
 async def error_handler(request: Request, exc: Exception = None):
-  if isinstance(exc, AssertionError):
-    print(f'Assertion error occurred during handling request {request}')
+    if isinstance(exc, AssertionError):
+        print(f'Assertion error occurred during handling request {request}')
 
 
 app = Application([])
@@ -374,6 +374,18 @@ This `<Header>` length is always `8 bytes` and it consists of:
 + Data type `1 byte unsigned int`
 + Compression type `1 byte unsigned int`
 + Data length `4 bytes unsigned int` - Shows how long `<Message Header>` + `2 empty bytes` + `<Data>` sections are
+
+**Header type `05`** - Download speed
+
+[see below](#speed-limiter)
+
+**Header type `06`** - Cancel input
+
+[see below](#cancelling-inputs)
+
+**Header type `FF`** - Ping-Pong
+
+[see below](#ping-pong)
 
 ### Message header
 
@@ -520,3 +532,23 @@ bytes per seconds.
 - The default speed limit for connection: 1 << 25 (32 MB).
 - If you send `00 00 00 00` - there will be no speed limit.
 - Speed limit must be `0` or in range `1KB - 32MB` \[1024 .. 33_554_432 bytes\]
+
+## Cancelling inputs
+
+> If clients wants to cancel requests that waits for client input, it must send `06` _(header type 6)_ and `2 bytes unsigned int` - message id of the request.
+>
+> This will stop server from waiting for input response and therefore client will receive an error regarding request cancellation.
+>
+> *WARNING* Request may not return an error in some cases. CancelInput request won't return its own response.
+
+## Ping-Pong
+
+> If `idle_timeout` is not None - you may want to keep connection alive.
+> We have ping-pong mechanism included in protocol, so you wouldn't have to think about it.
+>
+> For auto ping loop to work call `Conncetion.start(ping=True)` (False is default)
+
+If client wants to Ping server it must send `FF` _(header type 255)_ and `8 bytes unsigned int` - current client time in
+milliseconds UTC. Server will respond immediately with the same message structure.
+
+Thus, you will be able to understand an approximate amount of time required to send request and receive an answer.
