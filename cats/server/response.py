@@ -6,12 +6,13 @@ from inspect import isasyncgen, isgenerator
 from io import BytesIO
 from pathlib import Path
 from struct import Struct
-from typing import Any, Dict, Union
+
+import pytz
 
 from cats.codecs import Codec
 from cats.compression import Compressor
 from cats.errors import MalformedDataError, ProtocolError
-from cats.headers import Headers
+from cats.headers import Headers, T_Headers
 from cats.typing import BytesAnyGen
 from cats.utils import tmp_file
 
@@ -21,6 +22,9 @@ __all__ = [
     'Response',
     'StreamResponse',
     'InputResponse',
+    'DownloadResponse',
+    'CancelInputResponse',
+    'Pong',
 ]
 
 MAX_SEND_CHUNK_SIZE = 1 << 25
@@ -31,11 +35,29 @@ class BaseResponse:
 
     __slots__ = ('headers', 'data',)
 
-    def __init__(self, data: Any = None, headers: Union[Dict[str, Any], Headers] = None):
+    def __init__(self, data=None, *, headers: T_Headers = None, status: int = 200):
         if headers is not None and not isinstance(headers, dict):
             raise MalformedDataError('Invalid Headers provided')
+
         self.data = data
         self.headers = Headers(headers or {})
+        self.status = self.headers.get('Status', status or 200)
+
+    @property
+    def status(self) -> int:
+        return self.headers.get('Status', 200)
+
+    @status.setter
+    def status(self, value: int = None):
+        if value is None:
+            value = 200
+        elif not isinstance(value, int):
+            raise MalformedDataError('Invalid status type')
+        self.headers['Status'] = value
+
+    @status.deleter
+    def status(self):
+        self.status = 200
 
     async def send_to_conn(self, conn):
         raise NotImplementedError
@@ -55,15 +77,15 @@ class BaseResponse:
 class BasicResponse(BaseResponse, metaclass=ABCMeta):
     __slots__ = ('message_id', 'data_type', '_data_len', 'compression', 'encoded', 'offset')
 
-    def __init__(self, data: Any = None, headers: Union[Dict[str, Any], Headers] = None,
-                 compression: int = None, data_type: int = None):
+    def __init__(self, data=None, compression: int = None, data_type: int = None, *,
+                 headers: T_Headers = None, status: int = None):
         self.compression = compression
         self.data_type = data_type
         self.message_id = 0
         self._data_len = 0
         self.offset: int = 0
         self.encoded: bool = False
-        super().__init__(data, headers)
+        super().__init__(data, headers=headers, status=status)
 
     async def _encode_data(self, conn):
         if self.encoded:
@@ -104,33 +126,26 @@ class BasicResponse(BaseResponse, metaclass=ABCMeta):
 
 
 class Response(BasicResponse):
-    __slots__ = ('status', 'handler_id',)
+    __slots__ = ('handler_id',)
     struct = Struct('>HHQBBI')
-    header_type = bytes([0])
+    header_type = bytes([0x00])
 
-    def __init__(self, data: Any = None, headers: Union[Dict[str, Any], Headers] = None,
-                 status: int = 200, compression: int = None,
-                 data_type: int = None):
-        if status is None:
-            status = 200
-        elif not isinstance(status, int):
-            raise MalformedDataError('Invalid status type')
+    def __init__(self, data=None, compression: int = None, data_type: int = None, *,
+                 headers: T_Headers = None, status: int = None):
         if compression is not None and not isinstance(compression, int):
             raise MalformedDataError('Invalid compression type')
         if data_type is not None and not isinstance(data_type, int):
             raise MalformedDataError('Invalid data type provided')
 
-        super().__init__(data=data, headers=headers, compression=compression, data_type=data_type)
+        super().__init__(data=data, compression=compression, data_type=data_type,
+                         headers=headers, status=status)
 
-        self.status = status
         self.handler_id: int = 0
 
     async def send_to_conn(self, conn):
         await self._encode_data(conn)
 
         try:
-            if self.status is not None and 'Status' not in self.headers:
-                self.headers['Status'] = self.status
             message_headers = self.headers.encode() + self.HEADER_SEPARATOR
 
             header = self.header_type + self.struct.pack(
@@ -142,8 +157,8 @@ class Response(BasicResponse):
                 self._data_len + len(message_headers)
             ) + message_headers
 
-            conn.reset_idle_timer()
             async with conn.lock_write():
+                conn.reset_idle_timer()
                 await conn.stream.write(header)
                 await self._write_to_stream(conn)
         finally:
@@ -153,13 +168,13 @@ class Response(BasicResponse):
 
 class StreamResponse(Response):
     struct = Struct('>HHQBB')
-    header_type = bytes([1])
+    header_type = bytes([0x01])
 
-    def __init__(self, data: BytesAnyGen, data_type: int, headers: Union[Dict[str, Any], Headers] = None,
-                 status: int = 200, compression: int = None):
+    def __init__(self, data: BytesAnyGen, data_type: int, compression: int = None, *,
+                 headers: T_Headers = None, status: int = None):
         if not isgenerator(data) and not isasyncgen(data):
             raise MalformedDataError('StreamResponse supports only byte generators')
-        super().__init__(data=data, headers=headers, status=status, compression=compression, data_type=data_type)
+        super().__init__(data=data, compression=compression, data_type=data_type, headers=headers, status=status)
 
     async def send_to_conn(self, conn):
         await self._encode_data(conn)
@@ -171,13 +186,10 @@ class StreamResponse(Response):
             self.data_type,
             self.compression
         )
-
-        if self.status is not None and 'Status' not in self.headers:
-            self.headers['Status'] = self.status
         message_headers = self.headers.encode()
 
-        conn.reset_idle_timer()
         async with conn.lock_write():
+            conn.reset_idle_timer()
             await conn.stream.write(header)
             await conn.stream.write(len(message_headers).to_bytes(4, 'big', signed=False))
             await conn.stream.write(message_headers)
@@ -251,7 +263,7 @@ class StreamResponse(Response):
 
 class InputResponse(BasicResponse):
     struct = Struct('>HBBI')
-    header_type = bytes([2])
+    header_type = bytes([0x02])
 
     async def send_to_conn(self, conn):
         await self._encode_data(conn)
@@ -265,10 +277,54 @@ class InputResponse(BasicResponse):
                 self._data_len + len(message_headers)
             ) + message_headers
 
-            conn.reset_idle_timer()
             async with conn.lock_write():
+                conn.reset_idle_timer()
                 await conn.stream.write(header)
                 await self._write_to_stream(conn)
         finally:
             if isinstance(self.data, Path):
                 self.data.unlink(missing_ok=True)
+
+
+class DownloadResponse(BaseResponse):
+    struct = Struct('>I')
+    header_type = bytes([0x05])
+
+    def __init__(self, data: int = 0):
+        super().__init__(data)
+        if not isinstance(self.data, int):
+            raise TypeError('DownloadSpeed must be int')
+
+    async def send_to_conn(self, conn):
+        async with conn.lock_write():
+            conn.reset_idle_timer()
+            speed: int = self.data
+            await conn.stream.write(self.header_type + speed.to_bytes(4, 'big', signed=False))
+
+
+class CancelInputResponse(BaseResponse):
+    struct = Struct('>H')
+    header_type = bytes([0x06])
+
+    def __init__(self, data: int):
+        super().__init__(data=data)
+
+    async def send_to_conn(self, conn):
+        async with conn.lock_write():
+            conn.reset_idle_timer()
+            message_id: int = self.data
+            await conn.stream.write(self.header_type + message_id.to_bytes(2, 'big', signed=False))
+
+
+class Pong(BaseResponse):
+    struct = Struct('>Q')
+    header_type = bytes([0xFF])
+
+    def __init__(self):
+        super().__init__(data=None)
+
+    async def send_to_conn(self, conn):
+        async with conn.lock_write():
+            conn.reset_idle_timer()
+            now = int(datetime.now(tz=pytz.UTC).timestamp() * 1000)
+            await conn.stream.write(self.header_type + now.to_bytes(8, 'big', signed=False))

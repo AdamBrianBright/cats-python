@@ -164,3 +164,15 @@ async def test_api_payload_offset_files(cats_conn: Connection):
         assert isinstance(val, FileInfo)
         assert val.size == 5
         assert val.path.read_bytes() == b'67890'
+
+
+@mark.asyncio
+async def test_cancel_input(cats_conn: Connection):
+    await cats_conn.send(0xFFA0, None)
+    response = await cats_conn.recv()
+    assert isinstance(response, InputRequest)
+    assert response.data == b'Are you ok?'
+    await response.cancel()
+    response = await cats_conn.recv()
+    assert isinstance(response, Request)
+    assert response.status == 500, response.data

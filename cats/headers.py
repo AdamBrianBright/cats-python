@@ -1,11 +1,16 @@
+from typing import Any, Dict, Union
+
 import ujson
 
 from cats.errors import ProtocolError
 from cats.typing import Bytes
 
 __all__ = [
+    'T_Headers',
     'Headers',
 ]
+
+T_Headers = Union[Dict[str, Any], 'Headers']
 
 
 class Headers(dict):

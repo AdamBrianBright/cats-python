@@ -1,12 +1,15 @@
-from asyncio import BaseEventLoop, Future, Task
+from asyncio import BaseEventLoop, Future, Task, get_event_loop
 from contextlib import asynccontextmanager
-from typing import Any, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple
 
 from sentry_sdk import Scope
 from tornado.iostream import IOStream
 
-from cats import Headers, Identity
-from cats.server import Application, BaseRequest, HandlerFunc, InputRequest, Request
+from cats.headers import T_Headers
+from cats.identity import Identity
+from cats.server.app import Application
+from cats.server.handlers import HandlerFunc
+from cats.server.request import BaseRequest, Input, InputRequest, Request
 from cats.typing import BytesAnyGen
 
 
@@ -15,25 +18,25 @@ class Connection:
 
     __slots__ = (
         '_closed', 'stream', 'host', 'port', 'api_version', '_app', '_scope', 'download_speed',
-        '_identity', '_credentials', 'loop', 'input_queue', '_idle_timer', '_message_pool', 'is_sending',
+        '_identity', '_credentials', 'loop', 'input_deq', '_idle_timer', '_message_pool', 'is_sending',
     )
 
     def __init__(self, stream: IOStream, address: Tuple[str, int], api_version: int, app: Application):
-        self._closed: bool
+        self._closed: bool = False
         self.stream: IOStream
-        self.host: str
-        self.port: int
-        self.api_version: int
-        self._app: Application
-        self._scope: Scope
+        self.host: str = address[0]
+        self.port: int = address[1]
+        self.api_version: int = api_version
+        self._app: Application = app
+        self._scope: Scope = Scope()
         self._identity: Optional[Identity] = None
         self._credentials: Any = None
-        self.loop: BaseEventLoop
-        self.input_queue: Dict[int, Future]
-        self._idle_timer: Optional[Future]
-        self._message_pool: List[int]
-        self.is_sending: bool
-        self.download_speed: int
+        self.loop: BaseEventLoop = get_event_loop()
+        self.input_deq: Dict[int, Input] = {}
+        self._idle_timer: Optional[Future] = None
+        self._message_pool: List[int] = []
+        self.is_sending: bool = False
+        self.download_speed: int = 0
 
     @property
     def is_open(self) -> bool: ...
@@ -43,16 +46,18 @@ class Connection:
 
     async def init(self) -> None: ...
 
-    async def start(self) -> None: ...
+    async def start(self, ping: bool = True) -> None: ...
+
+    async def ping(self) -> None: ...
 
     async def set_download_speed(self, speed: int = 0): ...
 
-    async def send(self, handler_id: int, data: Any, headers: Union[Dict[str, Any], Headers] = None,
-                   message_id: int = None, status: int = None, compression: int = None) -> None: ...
+    async def send(self, handler_id: int, data: Any, message_id: int = None, compression: int = None, *,
+                   headers: T_Headers = None, status: int = 200) -> None: ...
 
     async def send_stream(self, handler_id: int, data: BytesAnyGen, data_type: int,
-                          headers: Union[Dict[str, Any], Headers] = None,
-                          message_id: int = None, status: int = None, compression: int = None) -> None: ...
+                          message_id: int = None, compression: int = None, *,
+                          headers: T_Headers = None, status: int = 200) -> None: ...
 
     def on_tick_done(self, task: Task): ...
 

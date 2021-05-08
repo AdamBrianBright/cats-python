@@ -6,7 +6,7 @@ from typing import Any, Dict, IO, List, Optional, Type, Union
 
 import ujson
 
-from cats.headers import Headers
+from cats.headers import T_Headers
 from cats.utils import tmp_file
 
 __all__ = [
@@ -59,7 +59,7 @@ class BaseCodec:
     type_name: str
 
     @classmethod
-    async def encode(cls, data: Any, headers) -> bytes:
+    async def encode(cls, data: Any, headers: T_Headers) -> bytes:
         """
         :raise TypeError: Encoder doesn't support this type
         :raise ValueError: Failed to encode
@@ -67,7 +67,7 @@ class BaseCodec:
         raise NotImplementedError
 
     @classmethod
-    async def decode(cls, data: Union[bytes, Path], headers) -> Any:
+    async def decode(cls, data: Union[bytes, Path], headers: T_Headers) -> Any:
         """
         :raise TypeError: Encoder doesn't support this type
         :raise ValueError: Failed to decode
@@ -80,14 +80,14 @@ class ByteCodec(BaseCodec):
     type_name = 'bytes'
 
     @classmethod
-    async def encode(cls, data: Byte, headers: Headers, offset: int) -> bytes:
+    async def encode(cls, data: Byte, headers: T_Headers, offset: int = 0) -> bytes:
         if data is not None and not isinstance(data, (bytes, bytearray, memoryview)):
             raise TypeError(f'{cls.__name__} does not support {type(data).__name__}')
 
         return (bytes(data) if data else bytes())[offset:]
 
     @classmethod
-    async def decode(cls, data: bytes, headers) -> bytes:
+    async def decode(cls, data: bytes, headers: T_Headers) -> bytes:
         return bytes(data) if data else bytes()
 
 
@@ -97,7 +97,7 @@ class JsonCodec(BaseCodec):
     encoding = 'utf-8'
 
     @classmethod
-    async def encode(cls, data: Json, headers: Headers, offset: int) -> bytes:
+    async def encode(cls, data: Json, headers: T_Headers, offset: int = 0) -> bytes:
         if not isinstance(data, (str, int, float, dict, list, bool, type(None))):
             raise TypeError(f'{cls.__name__} does not support {type(data).__name__}')
 
@@ -162,7 +162,7 @@ class FileCodec(BaseCodec):
             return data
 
     @classmethod
-    async def encode(cls, data: FILE_TYPES, headers: Headers, offset: int) -> Path:
+    async def encode(cls, data: FILE_TYPES, headers: T_Headers, offset: int = 0) -> Path:
         tmp = tmp_file()
         try:
             buff = tuple(cls.normalize_input(data).items())
@@ -249,7 +249,7 @@ class Codec:
     }
 
     @classmethod
-    async def encode(cls, buff: Union[Byte, Json, FILE_TYPES], headers: Headers, offset: int = 0) -> (bytes, int):
+    async def encode(cls, buff: Union[Byte, Json, FILE_TYPES], headers: T_Headers, offset: int = 0) -> (bytes, int):
         """
         Takes any supported data type and returns tuple (encoded: bytes, type_id: int)
         """
@@ -263,7 +263,7 @@ class Codec:
         raise TypeError(f'Failed to encode data: Type {type(buff).__name__} not supported')
 
     @classmethod
-    async def decode(cls, buff: Union[Byte, Path], data_type: int, headers: Headers) -> Union[Byte, Json, Files]:
+    async def decode(cls, buff: Union[Byte, Path], data_type: int, headers: T_Headers) -> Union[Byte, Json, Files]:
         """
         Takes byte buffer, type_id and try to decode it to internal data types
         """

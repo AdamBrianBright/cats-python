@@ -4,5 +4,5 @@ from .handshake import *
 from .headers import *
 from .identity import *
 
-version = "2.3.4"
-version_info = (2, 3, 4, 0)
+version = "3.0.0"
+version_info = (3, 0, 0, 0)

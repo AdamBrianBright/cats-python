@@ -3,40 +3,70 @@ from abc import ABCMeta
 from asyncio import Future
 from datetime import datetime, timezone
 from struct import Struct
-from typing import Any, Dict, Optional, Type, Union
+
+import pytz
 
 from cats.codecs import Codec
 from cats.compression import Compressor
-from cats.errors import ProtocolError
+from cats.errors import MalformedDataError, ProtocolError
 from cats.headers import Headers
-from cats.server.response import InputResponse
+from cats.server.response import CancelInputResponse, InputResponse
+from cats.typing import PingData
 from cats.utils import tmp_file
 
 __all__ = [
+    'Input',
     'BaseRequest',
     'Request',
     'StreamRequest',
     'InputRequest',
+    'DownloadSpeed',
+    'CancelInput',
+    'Ping',
 ]
+
+
+class Input:
+    def __init__(self, future, timeout, conn, message_id, bypass_count):
+        self.future = future
+        self.timer = None
+        self.conn = conn
+        self.message_id = message_id
+        self.bypass_count = bypass_count
+        if timeout:
+            self.timer = self.conn.loop.call_later(timeout, self.cancel)
+
+    def cancel(self):
+        if self.timer is not None and not self.timer.done():
+            self.timer.cancel()
+            self.timer = None
+        if not self.future.done():
+            self.future.cancel()
+        self.conn.input_deq.pop(self.message_id, None)
 
 
 class BaseRequest(dict):
     __slots__ = ('conn', 'message_id', 'headers', 'data',)
-    __registry__: Dict[int, Type['BaseRequest']] = {}
+    __registry__ = {}
     type_id: int
     struct: Struct
     HEADER_SEPARATOR = b'\x00\x00'
 
-    def __init__(self, conn, message_id: int):
+    def __init__(self, conn, message_id, *, headers=None, status=200):
         if self.__class__ == BaseRequest:
             raise RuntimeError('Creation of BaseRequest instances are prohibited')
+
+        if headers is not None and not isinstance(headers, dict):
+            raise MalformedDataError('Invalid Headers provided')
+
         super().__init__()
         self.conn = conn
         self.message_id = message_id
-        self.headers = Headers()
+        self.headers = Headers(headers or {})
+        self.status = self.headers.get('Status', status or 200)
         self.data = None
 
-    def __init_subclass__(cls, /, type_id: int = 0, struct: Struct = None, abstract: bool = False):
+    def __init_subclass__(cls, /, type_id=0, struct=None, abstract=False):
         if abstract:
             return
         assert isinstance(type_id, int) and type_id >= 0, f'Invalid {type_id = } provided'
@@ -46,35 +76,61 @@ class BaseRequest(dict):
         setattr(cls, 'type_id', type_id)
         setattr(cls, 'struct', struct)
 
+    @property
+    def status(self):
+        return self.headers.get('Status', 200)
+
+    @status.setter
+    def status(self, value=None):
+        if value is None:
+            value = 200
+        elif not isinstance(value, int):
+            raise MalformedDataError('Invalid status type')
+        self.headers['Status'] = value
+
+    @status.deleter
+    def status(self):
+        self.status = 200
+
     @classmethod
-    def get_class_by_type_id(cls, message_type: int) -> Optional[Type['BaseRequest']]:
+    def get_class_by_type_id(cls, message_type):
         return cls.__registry__.get(message_type)
 
-    async def input(self, data: Any = None, headers: Union[Dict[str, Any], Headers] = None,
-                    data_type: int = None, compression: int = None) -> 'InputRequest':
+    async def input(self, data=None, data_type=None, compression=None, *,
+                    headers=None, status=None, bypass_limit=False, bypass_count=False, timeout=None):
         fut = Future()
-        if self.message_id in self.conn.input_queue:
+        timeout = self.conn.app.input_timeout if timeout is None else timeout
+
+        if not bypass_limit:
+            amount = sum(1 for i in self.conn.input_deq.values() if not i.bypass_count)
+            if amount > self.conn.app.INPUT_LIMIT:
+                k = min(self.conn.input_deq.keys())
+                self.conn.input_deq[k].cancel()
+
+        inp = Input(fut, timeout, self.conn, self.message_id, bypass_count)
+        if self.message_id in self.conn.input_deq:
             raise ProtocolError(f'Input query with MID {self.message_id} already exists')
 
-        self.conn.input_queue[self.message_id] = fut
-        response = InputResponse(data, headers, compression=compression, data_type=data_type)
+        self.conn.input_deq[self.message_id] = inp
+        response = InputResponse(data, compression=compression, data_type=data_type, headers=headers, status=status)
         response.message_id = self.message_id
         await response.send_to_conn(self.conn)
         return await fut
 
     @classmethod
-    async def recv_from_conn(cls, conn) -> 'BaseRequest':
+    async def recv_from_conn(cls, conn):
         raise NotImplementedError
 
 
 class BasicRequest(BaseRequest, metaclass=ABCMeta, abstract=True):
     __slots__ = ('data_type', 'data_len', 'compression')
 
-    def __init__(self, conn, message_id: int, data_type: int, compression: int = 0, data_len: int = 0):
+    def __init__(self, conn, message_id, data_type, compression=0, data_len=0, *,
+                 headers=None, status=None):
         self.data_len = data_len
         self.data_type = data_type
         self.compression = compression
-        super().__init__(conn, message_id)
+        super().__init__(conn, message_id, headers=headers, status=status)
 
     async def recv_data(self):
         left = self.data_len
@@ -114,19 +170,16 @@ class BasicRequest(BaseRequest, metaclass=ABCMeta, abstract=True):
 class Request(BasicRequest, type_id=0x00, struct=Struct('>HHQBBI')):
     __slots__ = ('handler_id', 'send_time', 'data_type', 'data_len', 'compression')
 
-    def __init__(self, conn, message_id: int, handler_id: int, data_type: int,
-                 send_time: datetime = None, compression: int = 0, data_len: int = 0):
+    def __init__(self, conn, message_id, handler_id, data_type,
+                 send_time=None, compression=0, data_len=0, *, headers=None, status=None):
         self.handler_id = handler_id
         self.send_time = send_time or datetime.now(timezone.utc)
         super().__init__(conn=conn, message_id=message_id,
-                         compression=compression, data_type=data_type, data_len=data_len)
-
-    @property
-    def status(self) -> Optional[int]:
-        return self.headers.get('Status', None)
+                         compression=compression, data_type=data_type, data_len=data_len,
+                         headers=headers, status=status)
 
     @classmethod
-    async def recv_from_conn(cls, conn) -> 'Request':
+    async def recv_from_conn(cls, conn):
         conn.reset_idle_timer()
         buff = await conn.stream.read_bytes(cls.struct.size)
         handler_id, message_id, send_time, data_type, compression, data_len = cls.struct.unpack(buff)
@@ -142,19 +195,19 @@ class Request(BasicRequest, type_id=0x00, struct=Struct('>HHQBBI')):
             send_time=datetime.fromtimestamp(send_time / 1000, tz=timezone.utc),
             data_type=data_type,
             compression=compression,
-            data_len=data_len
+            data_len=data_len,
+            headers=headers,
         )
-        request.headers = headers
         await request.recv_data()
         return request
 
 
 class StreamRequest(Request, type_id=0x01, struct=Struct('>HHQBB')):
-    def __init__(self, conn, message_id: int, handler_id: int, data_type: int, send_time: datetime = None):
+    def __init__(self, conn, message_id, handler_id, data_type, send_time=None):
         super().__init__(conn, message_id, handler_id, data_type, send_time)
 
     @classmethod
-    async def recv_from_conn(cls, conn) -> 'StreamRequest':
+    async def recv_from_conn(cls, conn):
         conn.reset_idle_timer()
         buff = await conn.stream.read_bytes(cls.struct.size)
         handler_id, message_id, send_time, data_type, compression = cls.struct.unpack(buff)
@@ -230,7 +283,7 @@ class StreamRequest(Request, type_id=0x01, struct=Struct('>HHQBB')):
 
 class InputRequest(BasicRequest, type_id=0x02, struct=Struct('>HBBI')):
     @classmethod
-    async def recv_from_conn(cls, conn) -> 'InputRequest':
+    async def recv_from_conn(cls, conn):
         buff = await conn.stream.read_bytes(cls.struct.size)
         message_id, data_type, compression, data_len = cls.struct.unpack(buff)
 
@@ -238,25 +291,57 @@ class InputRequest(BasicRequest, type_id=0x02, struct=Struct('>HBBI')):
         data_len -= len(headers)
         headers = Headers.decode(headers[:-2])
 
-        request = cls(conn=conn, message_id=message_id, data_type=data_type, compression=compression, data_len=data_len)
-        request.headers = headers
+        request = cls(conn=conn,
+                      message_id=message_id,
+                      data_type=data_type,
+                      compression=compression,
+                      data_len=data_len,
+                      headers=headers)
         await request.recv_data()
         return request
 
-    async def answer(self, data: Any = None, headers: Union[Dict[str, Any], Headers] = None,
-                     compression: int = None, data_type: int = None) -> None:
-        response = InputResponse(data=data, headers=headers, compression=compression, data_type=data_type)
+    async def answer(self, data=None, compression=None, data_type=None, *,
+                     headers=None, status=None):
+        response = InputResponse(data=data, compression=compression, data_type=data_type,
+                                 headers=headers, status=status)
         response.message_id = self.message_id
         response.offset = self.headers.get('Offset', 0)
         await response.send_to_conn(self.conn)
 
+    async def cancel(self):
+        res = CancelInputResponse(self.message_id)
+        await res.send_to_conn(self.conn)
 
-class _DownloadSpeed(BaseRequest, type_id=0x05, struct=Struct('>I')):
+
+class DownloadSpeed(BaseRequest, type_id=0x05, struct=Struct('>I')):
     @classmethod
-    async def recv_from_conn(cls, conn) -> '_DownloadSpeed':
+    async def recv_from_conn(cls, conn):
         conn.reset_idle_timer()
         buff = await conn.stream.read_bytes(cls.struct.size)
-        speed, *_ = cls.struct.unpack(buff)
+        speed, = cls.struct.unpack(buff)
         request = cls(conn=conn, message_id=0)
         request.data = speed
+        return request
+
+
+class CancelInput(BaseRequest, type_id=0x06, struct=Struct('>H')):
+    @classmethod
+    async def recv_from_conn(cls, conn):
+        conn.reset_idle_timer()
+        buff = await conn.stream.read_bytes(cls.struct.size)
+        message_id, = cls.struct.unpack(buff)
+        return cls(conn=conn, message_id=message_id)
+
+
+class Ping(BaseRequest, type_id=0xFF, struct=Struct('>Q')):
+    @classmethod
+    async def recv_from_conn(cls, conn):
+        conn.reset_idle_timer()
+        buff = await conn.stream.read_bytes(cls.struct.size)
+        send_time, = cls.struct.unpack(buff)
+        request = cls(conn=conn, message_id=0)
+        request.data = PingData(
+            send_time=datetime.fromtimestamp(send_time * 1000, tz=pytz.UTC),
+            recv_time=datetime.now(tz=pytz.UTC),
+        )
         return request

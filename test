@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+
+poetry run python -m pytest --cov-config=.coveragerc --cov=cats tests || exit $?
+poetry run python -m coverage xml -i
+poetry run python -m coverage html -i
+poetry run python -m coverage report > coverage.txt
+echo 'DONE';

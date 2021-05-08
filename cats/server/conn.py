@@ -3,7 +3,7 @@ from contextlib import asynccontextmanager
 from functools import partial
 from logging import getLogger
 from random import randint
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+from typing import Any, Dict, Iterable, List, Optional, Tuple
 
 from sentry_sdk import Scope, add_breadcrumb, capture_exception
 from tornado.iostream import IOStream, StreamClosedError
@@ -11,11 +11,10 @@ from tornado.iostream import IOStream, StreamClosedError
 from cats.errors import ProtocolError
 from cats.events import Event
 from cats.handshake import HandshakeError
-from cats.headers import Headers
 from cats.identity import Identity
 from cats.server.handlers import HandlerFunc
-from cats.server.request import BaseRequest, InputRequest, Request
-from cats.server.response import Response, StreamResponse
+from cats.server.request import BaseRequest, CancelInput, DownloadSpeed, Input, InputRequest, Ping, Request
+from cats.server.response import Pong, Response, StreamResponse
 from cats.typing import BytesAnyGen
 
 __all__ = [
@@ -30,7 +29,7 @@ class Connection:
 
     __slots__ = (
         '_closed', 'stream', 'host', 'port', 'api_version', '_app', '_scope', 'download_speed',
-        '_identity', '_credentials', 'loop', 'input_queue', '_idle_timer', '_message_pool', 'is_sending',
+        '_identity', '_credentials', 'loop', 'input_deq', '_idle_timer', '_message_pool', 'is_sending',
     )
 
     def __init__(self, stream: IOStream, address: Tuple[str, int], api_version: int, app):
@@ -44,7 +43,7 @@ class Connection:
         self._identity: Optional[Identity] = None
         self._credentials: Any = None
         self.loop = get_event_loop()
-        self.input_queue: Dict[int, Future] = {}
+        self.input_deq: Dict[int, Input] = {}
         self._idle_timer: Optional[Future] = None
         self._message_pool: List[int] = []
         self.is_sending: bool = False
@@ -61,28 +60,40 @@ class Connection:
     async def init(self):
         logging.debug(f'{self} initialized')
 
-    async def start(self):
+    async def start(self, ping=False):
+        if ping:
+            self.loop.create_task(self.ping())
+
         while self.is_open:
             request = await self.recv()
             task: Task = self.loop.create_task(self.tick(request))
             task.add_done_callback(self.on_tick_done)
 
+    async def ping(self):
+        if self._app.idle_timeout is None:
+            return
+        wait = max(0.1, round(self._app.idle_timeout / 2, 2))
+        pong = Pong()
+        while self.is_open:
+            await sleep(wait)
+            await pong.send_to_conn(self)
+
     async def set_download_speed(self, speed: int = 0):
         await self.stream.write(b'\x05')
         await self.stream.write(speed.to_bytes(4, 'big', signed=False))
 
-    async def send(self, handler_id: int, data: Any = None, headers: Union[Dict[str, Any], Headers] = None,
-                   message_id: int = None, status: int = None, compression: int = None):
-        response = Response(data=data, headers=headers, status=status, compression=compression)
+    async def send(self, handler_id: int, data: Any = None, message_id: int = None, compression: int = None, *,
+                   headers=None, status=None):
+        response = Response(data=data, compression=compression, headers=headers, status=status)
         response.handler_id = handler_id
         response.message_id = self._get_free_message_id() if message_id is None else message_id
         await response.send_to_conn(self)
 
     async def send_stream(self, handler_id: int, data: BytesAnyGen, data_type: int,
-                          headers: Union[Dict[str, Any], Headers] = None,
-                          message_id: int = None, status: int = None, compression: int = None):
-        response = StreamResponse(data=data, headers=headers, status=status,
-                                  compression=compression, data_type=data_type)
+                          message_id: int = None, compression: int = None, *,
+                          headers=None, status=None):
+        response = StreamResponse(data=data, compression=compression, data_type=data_type,
+                                  headers=headers, status=status)
         response.handler_id = handler_id
         response.message_id = self._get_free_message_id() if message_id is None else message_id
         await response.send_to_conn(self)
@@ -102,12 +113,18 @@ class Connection:
         return self.app.channel(f'model_{self._identity.model_name}')
 
     async def tick(self, request: BaseRequest):
-        if request.type_id == 5:
+        if isinstance(request, DownloadSpeed):
             limit = request.data
             if not limit or 1024 <= limit <= 33_554_432:
                 self.download_speed = limit
             else:
                 logging.error('Unsupported download speed limit')
+        elif isinstance(request, Ping):
+            await Pong().send_to_conn(self)
+            logging.debug(f'Ping {request.data.send_time} [-] {request.data.recv_time}')
+        elif isinstance(request, CancelInput):
+            if request.message_id in self.input_deq:
+                self.input_deq[request.message_id].cancel()
         elif isinstance(request, Request):
             await self.handle_request(request)
         elif isinstance(request, InputRequest):
@@ -173,11 +190,12 @@ class Connection:
             self.close(exc)
 
     async def handle_input_answer(self, request):
-        fut: Future = self.input_queue.pop(request.message_id, None)
-        if fut is None:
+        inp: Input = self.input_deq.get(request.message_id, None)
+        if inp is None:
             raise ProtocolError('Received answer but input does`t exists')
-        fut.set_result(request)
-        fut.done()
+        inp.future.set_result(request)
+        inp.future.done()
+        inp.cancel()
 
     async def handle_request(self, request):
         message_id = request.message_id
